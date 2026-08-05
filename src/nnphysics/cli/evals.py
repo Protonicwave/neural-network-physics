@@ -36,12 +36,13 @@ from nnphysics.evals.snapshots import (
     capture_snapshots,
     write_snapshots,
 )
+from nnphysics.models import MODELS
 from nnphysics.reporting.environment import describe_environment, git_commit
 from nnphysics.reporting.layout import RunPaths, run_paths
 from nnphysics.reporting.record import RunRecord, write_record
 from nnphysics.systems import build_system
 
-__all__ = ["app"]
+__all__ = ["app", "summarise_suite"]
 
 app = typer.Typer(
     name="eval",
@@ -137,19 +138,25 @@ def run(
     except NNPhysicsError as error:
         _fail(str(error))
 
-    _summarise(result)
+    summarise_suite(result)
     typer.echo(f"Wrote {destination} and {paths.record} in {time.perf_counter() - started:.1f}s.")
 
 
 @app.command("list")
 def list_registered() -> None:
-    """List every registered metric and predictor."""
-    typer.echo("Metrics:")
-    for name in METRICS.names():
-        typer.echo(f"  {name}")
-    typer.echo("Predictors:")
-    for name in PREDICTORS.names():
-        typer.echo(f"  {name}")
+    """List every registered metric, predictor and model.
+
+    Models appear here because a trained one is scored as a predictor like any other,
+    so this is the one place a reader can see everything a suite might name.
+    """
+    for heading, names in (
+        ("Metrics", METRICS.names()),
+        ("Predictors", PREDICTORS.names()),
+        ("Models", MODELS.names()),
+    ):
+        typer.echo(f"{heading}:")
+        for name in names:
+            typer.echo(f"  {name}")
 
 
 def _capture(
@@ -218,8 +225,15 @@ def _record(
     )
 
 
-def _summarise(result: SuiteResult) -> None:
-    """Print one line per predictor and split, with one number per metric."""
+def summarise_suite(result: SuiteResult) -> None:
+    """Print one line per predictor and split, with one number per metric.
+
+    Shared with `nnp train`, which scores a model against the same suite and should
+    report it the same way.
+
+    Args:
+        result: What the suite produced.
+    """
     typer.echo(
         f"System {result.system}, suite {result.settings.name}, "
         f"{result.settings.rollout_steps} steps from "
@@ -232,7 +246,12 @@ def _summarise(result: SuiteResult) -> None:
                 numbers.append(f"{metric.split('_')[0]}.{key}={entry.scalar(metric, key):.3g}")
             except KeyError:
                 continue
-        suffix = "" if entry.completed else "  [a rollout stopped early]"
+        if not entry.metrics:
+            suffix = "  [no rollout took a step, so nothing was scored]"
+        elif not entry.completed:
+            suffix = "  [a rollout stopped early]"
+        else:
+            suffix = ""
         typer.echo(f"  {entry.split:>9} {entry.predictor:<20} {'  '.join(numbers)}{suffix}")
     if result.regime_gap:
         typer.echo(f"Regime gap recorded for {len(result.regime_gap)} scalars.")

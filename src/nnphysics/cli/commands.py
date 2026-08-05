@@ -17,6 +17,7 @@ import typer
 from nnphysics.cli.data import app as data_app
 from nnphysics.cli.evals import app as eval_app
 from nnphysics.cli.report import app as report_app
+from nnphysics.cli.train import train
 from nnphysics.core.config import RunConfig, load_run_config
 from nnphysics.core.errors import NNPhysicsError
 
@@ -49,11 +50,6 @@ def _announce(action: str, config: Path | None) -> None:
     typer.echo(f"System {resolved.system.name}, model {resolved.model.name}, seed {resolved.seed}.")
     typer.echo(f"Artefacts would be written to {resolved.run_dir}.")
     typer.echo("Not implemented yet.")
-
-
-def train(config: ConfigOption = None) -> None:
-    """Train a surrogate on generated trajectories."""
-    _announce("Train a surrogate", config)
 
 
 def diagnose(config: ConfigOption = None) -> None:

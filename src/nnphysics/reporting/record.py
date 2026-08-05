@@ -27,6 +27,7 @@ from nnphysics.core.config import RunConfig
 from nnphysics.core.errors import ConfigurationError
 from nnphysics.evals.result import SuiteResult, upgrade_result
 from nnphysics.reporting.environment import EnvironmentRecord
+from nnphysics.training.history import TrainingHistory
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,6 +59,10 @@ class RunRecord(BaseModel):
         environment: The machine and the libraries.
         timings: Named wall clock durations in seconds, for example how long the
             evaluation took.
+        training: What training recorded about itself, epoch by epoch, or `None` for a
+            run that only evaluated. Optional rather than versioned away, because a run
+            that scores the reference solver and the broken baselines trains nothing and
+            is still a run.
         evaluation: Every metric output.
         artefacts: Role to path, relative to the run directory. Relative so that a run
             directory can be moved and still describe itself.
@@ -74,6 +79,7 @@ class RunRecord(BaseModel):
     config: RunConfig
     environment: EnvironmentRecord
     timings: dict[str, float] = {}
+    training: TrainingHistory | None = None
     evaluation: SuiteResult
     artefacts: dict[str, str] = {}
 
