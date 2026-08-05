@@ -85,7 +85,9 @@ def test_an_undeclared_regime_is_rejected() -> None:
 
 
 def test_a_batch_comes_back_in_request_order() -> None:
-    requests = list(iter_requests("nbody", {"softening": 0.05}, "cold_collapse", 3, SPEC, SEED))
+    requests = list(
+        iter_requests("nbody", {"softening": 0.05}, "cold_collapse", count=3, spec=SPEC, seed=SEED)
+    )
     trajectories = generate_many(requests, workers=1)
     assert [request.index for request in requests] == [0, 1, 2]
     for request, trajectory in zip(requests, trajectories, strict=True):
@@ -97,7 +99,9 @@ def test_a_batch_comes_back_in_request_order() -> None:
 
 
 def test_worker_count_does_not_change_what_is_generated() -> None:
-    requests = list(iter_requests("nbody", {"softening": 0.05}, "cold_collapse", 4, SPEC, SEED))
+    requests = list(
+        iter_requests("nbody", {"softening": 0.05}, "cold_collapse", count=4, spec=SPEC, seed=SEED)
+    )
     serial = generate_many(requests, workers=1)
     parallel = generate_many(requests, workers=2)
     for one, other in zip(serial, parallel, strict=True):
@@ -106,7 +110,7 @@ def test_worker_count_does_not_change_what_is_generated() -> None:
 
 
 def test_an_empty_or_unusable_batch_is_rejected() -> None:
-    requests = list(iter_requests("nbody", {}, "cold_collapse", 1, SPEC, SEED))
+    requests = list(iter_requests("nbody", {}, "cold_collapse", count=1, spec=SPEC, seed=SEED))
     with pytest.raises(ValidationError):
         generate_many([], workers=1)
     with pytest.raises(ValidationError):
@@ -115,11 +119,15 @@ def test_an_empty_or_unusable_batch_is_rejected() -> None:
 
 def test_a_system_parameter_that_cannot_reach_a_worker_is_rejected() -> None:
     with pytest.raises(ValidationError):
-        list(iter_requests("nbody", {"softening": [0.05]}, "cold_collapse", 1, SPEC, SEED))
+        list(
+            iter_requests(
+                "nbody", {"softening": [0.05]}, "cold_collapse", count=1, spec=SPEC, seed=SEED
+            )
+        )
 
 
 def test_batches_cover_every_request_once() -> None:
-    requests = list(iter_requests("nbody", {}, "cold_collapse", 7, SPEC, SEED))
+    requests = list(iter_requests("nbody", {}, "cold_collapse", count=7, spec=SPEC, seed=SEED))
     batches = list(batched(requests, 3))
     assert [len(batch) for batch in batches] == [3, 3, 1]
     assert [request.index for batch in batches for request in batch] == list(range(7))

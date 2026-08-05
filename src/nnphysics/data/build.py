@@ -138,9 +138,9 @@ def build_dataset(config: RunConfig, *, progress: Progress | None = None) -> Pat
             system.name,
             config.system.parameters,
             name,
-            config.data.n_trajectories,
-            spec,
-            config.seed,
+            count=config.data.n_trajectories,
+            spec=spec,
+            seed=config.seed,
         )
         for shard_index, batch in enumerate(batched(requests, config.data.shard_trajectories)):
             file_name = shard_name(name, shard_index)

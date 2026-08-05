@@ -43,6 +43,8 @@ more than it needs."""
 
 _HASH_BLOCK = 1 << 20
 
+_MAX_GZIP_LEVEL = 9
+
 
 def write_shard(
     path: Path,
@@ -66,8 +68,10 @@ def write_shard(
     """
     if not trajectories:
         raise ValidationError("cannot write a shard with no trajectories")
-    if not 0 <= compression_level <= 9:
-        raise ValidationError(f"gzip level must lie in [0, 9], got {compression_level}")
+    if not 0 <= compression_level <= _MAX_GZIP_LEVEL:
+        raise ValidationError(
+            f"gzip level must lie in [0, {_MAX_GZIP_LEVEL}], got {compression_level}"
+        )
     shapes = _check_uniform(trajectories)
     n_steps = len(trajectories[0])
 
@@ -263,9 +267,7 @@ def _check_uniform(trajectories: Sequence[Trajectory]) -> dict[str, tuple[int, .
     return shapes
 
 
-def _chunk_shape(
-    n_steps: int, field_shape: tuple[int, ...], itemsize: int
-) -> tuple[int, ...]:
+def _chunk_shape(n_steps: int, field_shape: tuple[int, ...], itemsize: int) -> tuple[int, ...]:
     """Chunk one trajectory at a time, over as many states as fit a target chunk size."""
     per_state = itemsize * int(np.prod(field_shape, dtype=np.int64)) if field_shape else itemsize
     steps = max(1, min(n_steps, _TARGET_CHUNK_BYTES // max(per_state, 1)))

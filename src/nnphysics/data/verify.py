@@ -146,8 +146,9 @@ def _check_reproduction(directory: Path, manifest: Manifest, sample: int) -> tup
                 failures.append(f"trajectory {record.id} could not be re-derived: {error}")
                 continue
             checked += 1
-            failures.extend(_compare(record.id, stored.fields, expected.fields, stored.times,
-                                     expected.times))
+            failures.extend(
+                _compare(record.id, stored.fields, expected.fields, stored.times, expected.times)
+            )
     finally:
         for reader in readers.values():
             reader.close()

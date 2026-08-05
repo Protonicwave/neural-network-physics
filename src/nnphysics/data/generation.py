@@ -137,9 +137,7 @@ def generate_trajectory(
     )
 
 
-def generate_many(
-    requests: Sequence[TrajectoryRequest], *, workers: int
-) -> list[Trajectory]:
+def generate_many(requests: Sequence[TrajectoryRequest], *, workers: int) -> list[Trajectory]:
     """Generate a batch of trajectories, in the order they were asked for.
 
     Args:
@@ -163,10 +161,13 @@ def generate_many(
         return [_rebuild(result) for result in pool.map(_generate, requests)]
 
 
-def iter_requests(
+def iter_requests(  # noqa: PLR0913
+    # Six, because a request carries six things. Grouping them would only name the same
+    # six somewhere else, and the type that groups them is `TrajectoryRequest` itself.
     system: str,
     parameters: SystemParameters,
     regime: str,
+    *,
     count: int,
     spec: TrajectorySpec,
     seed: int,
@@ -179,7 +180,8 @@ def iter_requests(
         regime: Regime name.
         count: Trajectories to generate.
         spec: The trajectory specification.
-        seed: Root seed of the run.
+        seed: Root seed of the run. Named rather than positional, so that it cannot be
+            swapped with the count or the index by mistake.
 
     Yields:
         One request per trajectory, in index order.
@@ -223,9 +225,7 @@ def _generate(request: TrajectoryRequest) -> _Result:
     """
     system = build_system(request.system, dict(request.parameters))
     regime = find_regime(system, request.regime)
-    trajectory = generate_trajectory(
-        system, regime, request.spec, request.seed, request.index
-    )
+    trajectory = generate_trajectory(system, regime, request.spec, request.seed, request.index)
     return dict(trajectory.fields), trajectory.times
 
 

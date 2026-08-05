@@ -64,8 +64,9 @@ class FieldStats:
         if self.count < 1:
             raise ValidationError(f"field statistics need at least one element, got {self.count}")
         if self.std < 0.0 or not np.isfinite([self.mean, self.std]).all():
-            raise ValidationError(f"field statistics are not usable: mean {self.mean}, std "
-                                  f"{self.std}")
+            raise ValidationError(
+                f"field statistics are not usable: mean {self.mean}, std {self.std}"
+            )
 
     @property
     def degenerate(self) -> bool:

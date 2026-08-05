@@ -103,9 +103,7 @@ def test_regimes_are_recorded_with_the_role_they_were_generated_for(built_nbody:
 def test_a_shard_holds_one_regime_only(built_nbody: Built) -> None:
     _, manifest, _ = built_nbody
     for record in manifest.shards:
-        regimes = {
-            entry.regime for entry in manifest.trajectories if entry.shard == record.path
-        }
+        regimes = {entry.regime for entry in manifest.trajectories if entry.shard == record.path}
         assert regimes == {record.regime}
 
 

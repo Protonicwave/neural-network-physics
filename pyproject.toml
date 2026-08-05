@@ -88,6 +88,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
+    "ANN401",  # a fixture that overrides configuration keys takes whatever they hold
     "D100",    # test modules do not need docstrings
     "D101",
     "D102",

@@ -51,9 +51,7 @@ def test_the_target_of_one_window_is_the_input_of_the_next(nbody_dataset: Shared
 def test_the_dataset_covers_every_window_of_every_trajectory(nbody_dataset: Shared) -> None:
     directory, manifest = nbody_dataset
     length = 2
-    windows = TrajectoryWindows(
-        directory, Split.TRAIN, sequence_length=length, manifest=manifest
-    )
+    windows = TrajectoryWindows(directory, Split.TRAIN, sequence_length=length, manifest=manifest)
     per_trajectory = manifest.spec.n_steps - length
     assert windows.windows_per_trajectory == per_trajectory
     assert len(windows) == len(manifest.split(Split.TRAIN)) * per_trajectory

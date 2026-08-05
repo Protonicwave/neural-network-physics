@@ -24,6 +24,9 @@ SEED_STREAM_TEMPLATE = "data.trajectory.{system}.{regime}.{index}"
 """How a trajectory's seed stream is derived. Recorded in the manifest so that a reader
 can re-derive any trajectory without reading this source."""
 
+_MINIMUM_STEPS = 2
+"""One state is a state, not a trajectory: there is no interval to learn from it."""
+
 
 @dataclass(frozen=True, slots=True)
 class TrajectorySpec:
@@ -40,15 +43,16 @@ class TrajectorySpec:
     substeps: int = 1
 
     def __post_init__(self) -> None:
-        if self.n_steps < 2:
+        if self.n_steps < _MINIMUM_STEPS:
             raise ValidationError(
-                f"a trajectory needs at least two recorded states, got {self.n_steps}"
+                f"a trajectory needs at least {_MINIMUM_STEPS} recorded states, got {self.n_steps}"
             )
         if not self.dt > 0.0:
             raise ValidationError(f"the recorded interval must be positive, got {self.dt}")
         if self.substeps < 1:
-            raise ValidationError(f"a recorded interval needs at least one solver step, got "
-                                  f"{self.substeps}")
+            raise ValidationError(
+                f"a recorded interval needs at least one solver step, got {self.substeps}"
+            )
 
     @property
     def solver_dt(self) -> float:

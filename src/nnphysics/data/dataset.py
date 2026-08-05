@@ -31,7 +31,6 @@ from nnphysics.data.manifest import Split, read_manifest
 from nnphysics.data.store import ShardReader
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from nnphysics.data.manifest import Manifest
@@ -88,7 +87,9 @@ class TrajectoryWindows(Dataset[Sample]):
             window does not fit in a trajectory.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
+        # Six settings, all but the directory optional and all but the split keyword
+        # only. Grouping them into an object would only move the same six somewhere else.
         self,
         directory: Path,
         split: Split = Split.TRAIN,
@@ -106,8 +107,8 @@ class TrajectoryWindows(Dataset[Sample]):
         self._split = split
         self._sequence_length = sequence_length
         self._normalisation = normalisation
-        self._manifest = manifest if manifest is not None else read_manifest(
-            directory / MANIFEST_NAME
+        self._manifest = (
+            manifest if manifest is not None else read_manifest(directory / MANIFEST_NAME)
         )
         # Raises if the split mixes shapes, which is the point: a batch could not be
         # collated from it, and finding that out here beats finding it out mid epoch.
