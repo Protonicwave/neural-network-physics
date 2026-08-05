@@ -20,7 +20,7 @@ class TestRegistration:
 
     def test_parameters_reach_the_factory(self) -> None:
         system = build_system("nbody", {"softening": 0.2})
-        assert system.invariants[0].evaluate is not None
+        assert system.invariants(system.regimes[0])[0].evaluate is not None
         assert system.name == "nbody"
 
     def test_an_unknown_name_is_rejected(self) -> None:

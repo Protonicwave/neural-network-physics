@@ -26,12 +26,24 @@ def test_it_declares_three_regimes() -> None:
 
 
 def test_it_declares_the_three_invariants() -> None:
-    assert [invariant.name for invariant in SYSTEM.invariants] == [
+    invariants = SYSTEM.invariants(SYSTEM.regimes[0])
+
+    assert [invariant.name for invariant in invariants] == [
         "energy",
         "linear_momentum",
         "angular_momentum",
     ]
-    assert all(isinstance(invariant, Invariant) for invariant in SYSTEM.invariants)
+    assert all(isinstance(invariant, Invariant) for invariant in invariants)
+
+
+def test_no_regime_changes_what_the_invariants_do() -> None:
+    """Softening is a system level parameter, so every regime measures the same energy."""
+    declarations = {
+        tuple((invariant.name, invariant.conservation) for invariant in SYSTEM.invariants(regime))
+        for regime in SYSTEM.regimes
+    }
+
+    assert len(declarations) == 1
 
 
 def test_it_declares_the_three_symmetries() -> None:
@@ -51,7 +63,7 @@ def test_the_energy_invariant_uses_the_system_softening() -> None:
     # The cold collapse starts at rest, so its energy is its potential energy alone.
     expected = system.dynamics.potential_energy(state.fields["position"], state.fields["mass"])
 
-    assert system.invariants[0].evaluate(state) == pytest.approx(expected)
+    assert system.invariants(cold)[0].evaluate(state) == pytest.approx(expected)
 
 
 def test_the_reference_predictor_is_velocity_verlet() -> None:

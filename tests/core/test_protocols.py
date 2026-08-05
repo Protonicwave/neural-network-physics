@@ -109,9 +109,8 @@ class Toy:
     def regimes(self) -> tuple[Regime, ...]:
         return (REGIME,)
 
-    @property
-    def invariants(self) -> tuple[Invariant, ...]:
-        return (Total(),)
+    def invariants(self, regime: Regime) -> tuple[Invariant, ...]:
+        return (Total(rtol=1e-9 * regime.parameters["rate"]),)
 
     @property
     def symmetries(self) -> tuple[Symmetry, ...]:
@@ -150,9 +149,10 @@ def test_a_system_can_be_driven_through_the_protocols_alone() -> None:
 
 def test_invariants_are_read_from_the_system_not_known_by_the_caller() -> None:
     system: System = Toy()
-    initial = system.initial_state(system.regimes[0], np.random.default_rng(0))
-    trajectory = roll_out(system.reference_predictor(system.regimes[0], 0.1), initial, 8)
-    for invariant in system.invariants:
+    regime = system.regimes[0]
+    initial = system.initial_state(regime, np.random.default_rng(0))
+    trajectory = roll_out(system.reference_predictor(regime, 0.1), initial, 8)
+    for invariant in system.invariants(regime):
         values = np.array([invariant.evaluate(state) for state in trajectory])
         drift = np.abs(values - values[0]).max() / max(abs(values[0]), 1e-30)
         assert drift < invariant.rtol or invariant.conservation is Conservation.APPROXIMATE
