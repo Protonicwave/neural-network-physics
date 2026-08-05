@@ -1,0 +1,31 @@
+# Template run configuration. The system, model and metric names are resolved against
+# registries that later phases fill in, so they do not name anything yet.
+name: example
+seed: 0
+output_dir: runs
+
+system:
+  name: placeholder
+
+data:
+  root: data
+  n_trajectories: 64
+  n_steps: 256
+  dt: 0.01
+  regimes: [train-a, train-b]
+  held_out_regimes: [held-out]
+  val_fraction: 0.1
+  test_fraction: 0.1
+
+model:
+  name: placeholder
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0
+
+evaluation:
+  metrics: [placeholder]
+  rollout_steps: 256

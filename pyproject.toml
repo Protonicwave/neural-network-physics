@@ -1,0 +1,116 @@
+[project]
+name = "nnphysics"
+description = "Neural surrogates for physical simulation, with an evaluation harness."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12,<3.13"
+dynamic = ["version"]
+dependencies = [
+    "numpy>=2.1",
+    "scipy>=1.14",
+    "torch>=2.5",
+    "h5py>=3.12",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "typer>=0.15",
+    "matplotlib>=3.9",
+]
+
+[project.scripts]
+nnp = "nnphysics.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "mypy>=1.13",
+    "ruff>=0.8",
+    "pre-commit>=4.0",
+    "types-pyyaml>=6.0",
+]
+
+# The target machine is CPU only. Pulling the CUDA build would cost gigabytes for
+# nothing, in the environment and in CI.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/nnphysics/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nnphysics"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",    # builtin shadowing
+    "ANN",  # missing annotations
+    "ARG",  # unused arguments
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "D",    # docstrings
+    "E",    # pycodestyle errors
+    "ERA",  # commented out code
+    "F",    # pyflakes
+    "I",    # import order
+    "N",    # naming
+    "PL",   # pylint
+    "PT",   # pytest style
+    "PTH",  # use pathlib
+    "RET",  # return statements
+    "RUF",  # ruff specific
+    "S",    # security
+    "SIM",  # simplify
+    "T20",  # print statements
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    "D105",  # magic methods do not need docstrings
+    "D107",  # __init__ is documented on the class
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "D100",    # test modules do not need docstrings
+    "D101",
+    "D102",
+    "D103",
+    "PLR2004", # magic values are the point of a test
+    "S101",    # assert is how tests assert
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config -m 'not slow and not integration'"
+markers = [
+    "slow: takes long enough that it is excluded from the default run",
+    "integration: crosses module boundaries and touches the filesystem",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["src/nnphysics"]
+branch = true
