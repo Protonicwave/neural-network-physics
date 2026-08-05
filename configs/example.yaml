@@ -11,11 +11,17 @@ data:
   root: data
   n_trajectories: 64
   n_steps: 256
+  # dt is the interval a surrogate learns. The solver takes dt / substeps.
   dt: 0.01
+  substeps: 1
   regimes: [train-a, train-b]
   held_out_regimes: [held-out]
   val_fraction: 0.1
   test_fraction: 0.1
+  # null means cores minus one.
+  workers: null
+  shard_trajectories: 16
+  compression_level: 4
 
 model:
   name: placeholder

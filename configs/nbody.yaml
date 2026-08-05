@@ -1,0 +1,47 @@
+# Default N-body dataset. The model and metric names are resolved against registries
+# that later phases fill in, so they do not name anything yet.
+name: nbody
+seed: 0
+output_dir: runs
+
+system:
+  name: nbody
+  parameters:
+    gravitational_constant: 1.0
+    softening: 0.01
+
+data:
+  root: data
+  n_trajectories: 64
+  n_steps: 256
+  # A stored step of 0.01 over 256 states covers 2.55 time units, which is several
+  # crossing times for a cluster of unit radius and unit total mass.
+  dt: 0.01
+  # Velocity Verlet stays accurate at a fiftieth of the shortest orbital period. Close
+  # encounters in the collapsing cloud set that period, and softening bounds it below,
+  # so the solver takes ten steps for every one that is stored.
+  substeps: 10
+  # Both trainable regimes carry 32 bodies, so a batch drawn from any of the training,
+  # validation or test splits can be stacked.
+  regimes: [cold_collapse, virialised_cluster]
+  # Four bodies in two tight binaries: a configuration class the model never sees, with
+  # two separated timescales rather than one.
+  held_out_regimes: [hierarchical_pair]
+  val_fraction: 0.15
+  test_fraction: 0.15
+  workers: null
+  shard_trajectories: 16
+  compression_level: 4
+
+model:
+  name: placeholder
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0
+
+evaluation:
+  metrics: [placeholder]
+  rollout_steps: 256
