@@ -108,6 +108,12 @@ explicit_package_bases = true
 namespace_packages = true
 mypy_path = "src"
 
+# h5py ships no type information, so its own annotations cannot be checked. Ours still
+# are: everything crossing the boundary in `data/store.py` is annotated by hand.
+[[tool.mypy.overrides]]
+module = ["h5py.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Tests mirror the source tree, so two systems give two `test_system.py`. The importlib

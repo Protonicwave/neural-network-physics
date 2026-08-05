@@ -1,9 +1,11 @@
 # Generated artefacts. Everything here is reproducible from a config and a seed.
-data/
-runs/
-checkpoints/
-plots/
-reports/
+# Anchored to the repository root, so that the `data` package and its tests are not
+# swept up by a rule meant for the generated data store.
+/data/
+/runs/
+/checkpoints/
+/plots/
+/reports/
 *.h5
 *.hdf5
 *.pt

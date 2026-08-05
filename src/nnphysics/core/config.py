@@ -65,24 +65,40 @@ class DataConfig(FrozenConfig):
     """Trajectory generation and splitting.
 
     Attributes:
-        root: Directory holding generated shards and their manifest.
+        root: Directory holding generated datasets.
         n_trajectories: Trajectories generated per regime.
-        n_steps: Steps recorded per trajectory.
-        dt: Time between recorded steps.
+        n_steps: States recorded per trajectory, the initial one included.
+        dt: Time between recorded states, which is the interval a surrogate learns.
+        substeps: Solver steps taken per recorded interval. The solver's own step is
+            `dt / substeps`, which is smaller than what is stored because stability
+            demands it and a surrogate should not have to pay for that.
         regimes: Regimes that training data is drawn from.
         held_out_regimes: Regimes never seen during training or model selection.
         val_fraction: Share of in distribution trajectories used for validation.
         test_fraction: Share of in distribution trajectories used for testing.
+        workers: Processes used for generation. `None` means cores minus one.
+        shard_trajectories: Trajectories per shard file, which bounds how much of a
+            dataset generation holds in memory at once.
+        compression_level: gzip level applied to stored arrays, zero for none.
     """
 
     root: Path = Path("data")
     n_trajectories: PositiveInt = 64
     n_steps: PositiveInt = 256
     dt: PositiveFloat = 0.01
+    substeps: PositiveInt = 1
     regimes: tuple[NonEmptyStr, ...] = Field(min_length=1)
     held_out_regimes: tuple[NonEmptyStr, ...] = Field(min_length=1)
     val_fraction: Fraction01 = 0.1
     test_fraction: Fraction01 = 0.1
+    workers: Annotated[int, Field(ge=1)] | None = None
+    shard_trajectories: PositiveInt = 16
+    compression_level: Annotated[int, Field(ge=0, le=9)] = 4
+
+    @property
+    def solver_dt(self) -> float:
+        """Step the reference solver actually takes."""
+        return self.dt / self.substeps
 
     @model_validator(mode="after")
     def _check_splits_and_regimes(self) -> Self:
@@ -91,6 +107,17 @@ class DataConfig(FrozenConfig):
         overlap = sorted(set(self.regimes) & set(self.held_out_regimes))
         if overlap:
             raise ValueError(f"regimes are both trained on and held out: {overlap}")
+        for field_name in ("regimes", "held_out_regimes"):
+            names = getattr(self, field_name)
+            if len(set(names)) != len(names):
+                raise ValueError(f"{field_name} names a regime more than once: {list(names)}")
+        # A split that rounds to nothing would silently stop being a split at all.
+        for name, fraction in (("val", self.val_fraction), ("test", self.test_fraction)):
+            if int(self.n_trajectories * fraction) < 1:
+                raise ValueError(
+                    f"{name}_fraction {fraction} of {self.n_trajectories} trajectories per "
+                    f"regime rounds down to an empty split"
+                )
         return self
 
 
