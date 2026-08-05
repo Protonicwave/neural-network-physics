@@ -94,6 +94,34 @@ def test_evaluation_needs_at_least_one_metric(tmp_path: Path) -> None:
         load_run_config(write(tmp_path, MINIMAL.replace("metrics: [placeholder]", "metrics: []")))
 
 
+def test_a_suite_carries_the_settings_its_numbers_depend_on(tmp_path: Path) -> None:
+    """A metric list on its own is not a suite.
+
+    The same metric over a different horizon answers a different question, so the settings
+    belong to the name a result file records.
+    """
+    config = load_run_config(write(tmp_path, MINIMAL))
+
+    assert config.evaluation.name
+    assert config.evaluation.predictors
+    assert config.evaluation.rollout_steps > 0
+    assert config.evaluation.error_thresholds
+    assert 0.0 < config.evaluation.distribution_window < 1.0
+
+
+@pytest.mark.parametrize("field", ["metrics", "predictors"])
+def test_a_suite_may_not_name_the_same_entry_twice(tmp_path: Path, field: str) -> None:
+    """Two entries would be averaged into one column, which reads as one run of it."""
+    suite = (
+        "  metrics: [a, a]"
+        if field == "metrics"
+        else "  metrics: [placeholder]\n  predictors: [a, a]"
+    )
+    doubled = MINIMAL.replace("  metrics: [placeholder]", suite)
+    with pytest.raises(ConfigurationError, match="more than once"):
+        load_run_config(write(tmp_path, doubled))
+
+
 def test_environment_overrides_are_applied_and_typed(tmp_path: Path) -> None:
     env: Mapping[str, str] = {
         "NNP_SEED": "11",

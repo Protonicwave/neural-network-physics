@@ -150,15 +150,45 @@ class TrainingConfig(FrozenConfig):
 
 
 class EvaluationConfig(FrozenConfig):
-    """The evaluation suite.
+    """The evaluation suite: a named set of metrics and the settings they run under.
+
+    Naming the whole thing is what makes two runs comparable. A metric list on its own is
+    not a suite, because the same metric over a different horizon or a different number
+    of initial conditions answers a different question.
 
     Attributes:
-        metrics: Registered metric names to run.
+        name: Suite name, recorded in every result file.
+        metrics: Registered metric names to run, in reporting order.
+        predictors: Predictor specifications evaluated by default, each `name` or
+            `name:key=value`.
         rollout_steps: Steps each predictor is rolled out for.
+        n_initial_conditions: Trajectories drawn from each split to roll out from.
+        error_thresholds: Normalised error levels a horizon is reported for.
+        symmetry_steps: Steps the equivariance test rolls out for. Shorter than the main
+            rollout by default, because it costs one extra rollout per declared symmetry.
+        distribution_window: Fraction of the rollout, taken from its end, that
+            distributional statistics are computed over.
+        divergence_factor: How far past its initial scale a state may go before a rollout
+            is abandoned and the reason recorded.
     """
 
+    name: NonEmptyStr = "default"
     metrics: tuple[NonEmptyStr, ...] = Field(min_length=1)
+    predictors: tuple[NonEmptyStr, ...] = Field(default=("reference",), min_length=1)
     rollout_steps: PositiveInt = 256
+    n_initial_conditions: PositiveInt = 4
+    error_thresholds: tuple[PositiveFloat, ...] = Field(default=(0.01, 0.1, 1.0), min_length=1)
+    symmetry_steps: PositiveInt = 32
+    distribution_window: Fraction01 = 0.25
+    divergence_factor: PositiveFloat = 1.0e3
+
+    @model_validator(mode="after")
+    def _check_names_are_distinct(self) -> Self:
+        for field_name in ("metrics", "predictors"):
+            names = getattr(self, field_name)
+            if len(set(names)) != len(names):
+                raise ValueError(f"{field_name} names the same entry more than once: {list(names)}")
+        return self
 
 
 class RunConfig(FrozenConfig):
