@@ -1,9 +1,10 @@
+from collections.abc import Callable
+
 import numpy as np
 import pytest
-from conftest import RollOut, TwoBody
 
-from nnphysics.core.protocols import Symmetry
-from nnphysics.core.types import State
+from nnphysics.core.protocols import Predictor, Symmetry
+from nnphysics.core.types import State, Trajectory
 from nnphysics.systems.nbody import (
     GalileanBoost,
     NBodyDynamics,
@@ -16,6 +17,8 @@ from nnphysics.systems.nbody import (
 
 EXACT = NBodyDynamics(gravitational_constant=1.0, softening=0.0)
 DECLARED = [Translation((1.5, -0.75)), Rotation(0.7), GalileanBoost((0.3, -0.2))]
+RollOut = Callable[[Predictor, State, int], Trajectory]
+TwoBody = Callable[..., tuple[State, float]]
 
 
 def max_difference(left: State, right: State) -> float:

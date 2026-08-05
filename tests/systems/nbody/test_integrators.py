@@ -1,8 +1,8 @@
+from collections.abc import Callable
 from itertools import pairwise
 
 import numpy as np
 import pytest
-from conftest import RollOut, TwoBody
 
 from nnphysics.core.errors import ValidationError
 from nnphysics.core.protocols import Predictor
@@ -18,6 +18,8 @@ from nnphysics.systems.nbody import (
 EXACT = NBodyDynamics(gravitational_constant=1.0, softening=0.0)
 
 Integrator = type[VelocityVerlet] | type[RungeKutta4]
+RollOut = Callable[[Predictor, State, int], Trajectory]
+TwoBody = Callable[..., tuple[State, float]]
 
 
 def max_position_error(left: State, right: State) -> float:

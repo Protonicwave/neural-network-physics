@@ -101,10 +101,19 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 files = ["src", "tests"]
+# The test tree mirrors the source tree, so module basenames repeat across directories.
+# Naming modules by their full path rather than by basename is what keeps them distinct.
+# That makes `src` a package base rather than part of a module name, hence `mypy_path`.
+explicit_package_bases = true
+namespace_packages = true
+mypy_path = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers --strict-config -m 'not slow and not integration'"
+# Tests mirror the source tree, so two systems give two `test_system.py`. The importlib
+# mode imports each by path instead of by bare module name, which is what lets them
+# coexist without turning the test tree into a package.
+addopts = "--strict-markers --strict-config --import-mode=importlib -m 'not slow and not integration'"
 markers = [
     "slow: takes long enough that it is excluded from the default run",
     "integration: crosses module boundaries and touches the filesystem",
