@@ -139,14 +139,85 @@ class TrainingConfig(FrozenConfig):
     Attributes:
         epochs: Passes over the training split.
         batch_size: Samples per optimiser step.
-        learning_rate: Initial learning rate.
+        learning_rate: Peak learning rate, reached at the end of warmup.
         weight_decay: L2 penalty applied by the optimiser.
+        warmup_epochs: Epochs the learning rate rises over before the cosine decay
+            starts. Zero starts at the peak.
+        final_learning_rate_fraction: Share of the peak the cosine decays to.
+        gradient_clip: Largest gradient norm an optimiser step may take. Zero turns
+            clipping off, which is only wanted when a test is measuring what it prevents.
+        patience: Epochs the validation metric may fail to improve before training stops.
+            `None` runs every configured epoch.
+        min_improvement: How much the validation metric must fall to count as an
+            improvement, in the units of the metric itself.
+        curriculum: Rollout lengths trained on, in order. A length of one is single step
+            training. Longer stages are what makes a surrogate stable over a long horizon.
+        curriculum_epochs: Epoch each curriculum stage starts at. The same length as
+            `curriculum`, starting at zero and strictly increasing.
+        validation_steps: Rollout length the validation metric is measured over. Fixed
+            rather than following the curriculum, because early stopping compares one
+            epoch's number against another's and a metric whose meaning changed partway
+            through would not be comparable with itself.
+        multi_step_weight: Weight on the mean error over the rest of the curriculum
+            window, relative to the one step term.
+        physics_weight: Weight on the model's own physics penalty. Zero by default: a
+            model that conserves energy because it was told to is a weaker result than
+            one that learns it.
+        window_stride: Distance between the starts of consecutive training windows. Above
+            one it trims an epoch at the cost of seeing less of each trajectory.
+        loader_workers: Processes the data loader reads with. Zero reads in the training
+            process, which is the default because these datasets fit in memory and a
+            worker costs more on this machine than it saves.
     """
 
     epochs: PositiveInt = 50
     batch_size: PositiveInt = 32
     learning_rate: PositiveFloat = 1e-3
     weight_decay: float = Field(default=0.0, ge=0.0)
+    warmup_epochs: Annotated[int, Field(ge=0)] = 0
+    final_learning_rate_fraction: float = Field(default=0.01, ge=0.0, le=1.0)
+    gradient_clip: float = Field(default=1.0, ge=0.0)
+    patience: PositiveInt | None = None
+    min_improvement: float = Field(default=0.0, ge=0.0)
+    curriculum: tuple[PositiveInt, ...] = Field(default=(1,), min_length=1)
+    curriculum_epochs: tuple[Annotated[int, Field(ge=0)], ...] = Field(default=(0,), min_length=1)
+    validation_steps: PositiveInt = 16
+    multi_step_weight: float = Field(default=1.0, ge=0.0)
+    physics_weight: float = Field(default=0.0, ge=0.0)
+    window_stride: PositiveInt = 1
+    loader_workers: Annotated[int, Field(ge=0)] = 0
+
+    @model_validator(mode="after")
+    def _check_schedule_and_curriculum(self) -> Self:
+        if self.warmup_epochs >= self.epochs:
+            raise ValueError(
+                f"warmup_epochs {self.warmup_epochs} leaves nothing to decay over in "
+                f"{self.epochs} epochs"
+            )
+        if len(self.curriculum) != len(self.curriculum_epochs):
+            raise ValueError(
+                f"curriculum has {len(self.curriculum)} stages but curriculum_epochs names "
+                f"{len(self.curriculum_epochs)} start epochs"
+            )
+        if self.curriculum_epochs[0] != 0:
+            raise ValueError(
+                f"the first curriculum stage must start at epoch 0, got {self.curriculum_epochs[0]}"
+            )
+        if any(
+            later <= earlier
+            for earlier, later in zip(
+                self.curriculum_epochs, self.curriculum_epochs[1:], strict=False
+            )
+        ):
+            raise ValueError(f"curriculum_epochs must increase, got {list(self.curriculum_epochs)}")
+        # A stage that starts after the last epoch is a stage that never runs, which reads
+        # as a curriculum the model was trained on and never was.
+        if self.curriculum_epochs[-1] >= self.epochs:
+            raise ValueError(
+                f"curriculum stage {len(self.curriculum)} starts at epoch "
+                f"{self.curriculum_epochs[-1]}, which {self.epochs} epochs never reach"
+            )
+        return self
 
 
 class EvaluationConfig(FrozenConfig):
