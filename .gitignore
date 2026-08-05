@@ -8,6 +8,7 @@
 /reports/
 *.h5
 *.hdf5
+*.npz
 *.pt
 *.ckpt
 

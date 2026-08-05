@@ -28,18 +28,28 @@ from nnphysics.evals.predictors import (
     parse_spec,
 )
 from nnphysics.evals.result import (
+    RESULT_SCHEMA_VERSION,
     PredictorResult,
     SuiteResult,
     read_result,
+    upgrade_result,
     write_result,
 )
 from nnphysics.evals.rollout import RolloutResult, StopReason, roll_out, roll_out_many
 from nnphysics.evals.runner import (
     EvaluationCase,
+    build_case_predictor,
     evaluate_predictor,
     load_cases,
     regime_gap,
     run_suite,
+)
+from nnphysics.evals.snapshots import (
+    Snapshot,
+    SnapshotSet,
+    capture_snapshots,
+    read_snapshots,
+    write_snapshots,
 )
 
 __all__ = [
@@ -49,24 +59,32 @@ __all__ = [
     "METRICS",
     "PREDICTORS",
     "REFERENCE_NAME",
+    "RESULT_SCHEMA_VERSION",
     "EvaluationCase",
     "MetricContext",
     "PredictorContext",
     "PredictorResult",
     "PredictorSpec",
     "RolloutResult",
+    "Snapshot",
+    "SnapshotSet",
     "StopReason",
     "Substepped",
     "SuiteResult",
+    "build_case_predictor",
     "build_metrics",
     "build_predictor",
+    "capture_snapshots",
     "evaluate_predictor",
     "load_cases",
     "parse_spec",
     "read_result",
+    "read_snapshots",
     "regime_gap",
     "roll_out",
     "roll_out_many",
     "run_suite",
+    "upgrade_result",
     "write_result",
+    "write_snapshots",
 ]
