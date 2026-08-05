@@ -21,16 +21,27 @@ from nnphysics.systems.fluid.initial_conditions import (
     viscosity,
 )
 from nnphysics.systems.fluid.integrators import DEFAULT_CFL_NUMBER, IntegratingFactorRK4
+from nnphysics.systems.fluid.invariants import ENSTROPHY, SPECIFIC_ENERGY, Enstrophy, KineticEnergy
+from nnphysics.systems.fluid.symmetries import QuarterTurn, Translation
+from nnphysics.systems.fluid.system import FluidSystem, build_fluid
 
 __all__ = [
     "DEFAULT_CFL_NUMBER",
+    "ENSTROPHY",
     "FLUID_REGIMES",
+    "SPECIFIC_ENERGY",
     "VORTICITY",
     "VORTICITY_FIELD",
+    "Enstrophy",
     "FluidDynamics",
     "FluidGrid",
+    "FluidSystem",
     "IntegratingFactorRK4",
+    "KineticEnergy",
+    "QuarterTurn",
     "SpectralOperators",
+    "Translation",
+    "build_fluid",
     "characteristic_length",
     "initial_state",
     "taylor_green_decay_rate",

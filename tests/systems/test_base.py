@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from nnphysics.core.errors import UnknownNameError, ValidationError
@@ -12,11 +13,30 @@ from nnphysics.systems import (
 
 
 class TestRegistration:
-    def test_importing_the_layer_registers_nbody(self) -> None:
-        assert "nbody" in SYSTEMS
+    @pytest.mark.parametrize("name", ["nbody", "fluid"])
+    def test_importing_the_layer_registers_both_systems(self, name: str) -> None:
+        assert name in SYSTEMS
 
-    def test_a_registered_name_builds_a_system(self) -> None:
-        assert isinstance(build_system("nbody"), System)
+    @pytest.mark.parametrize("name", ["nbody", "fluid"])
+    def test_a_registered_name_builds_a_system(self, name: str) -> None:
+        assert isinstance(build_system(name), System)
+
+    @pytest.mark.parametrize("name", ["nbody", "fluid"])
+    def test_both_systems_are_driven_through_the_protocol_alone(self, name: str) -> None:
+        """Nothing here knows which system it built, which is the whole point of the layer."""
+        system = build_system(name)
+        regime = system.regimes[0]
+        state = system.initial_state(regime, np.random.default_rng(0))
+        system.state_spec.validate(state)
+
+        stepped = system.reference_predictor(regime, 1e-3).step(state)
+
+        stepped.require_finite()
+        assert [invariant.evaluate(stepped) for invariant in system.invariants(regime)]
+        assert all(
+            symmetry.apply_inverse(symmetry.apply(state)) is not None
+            for symmetry in system.symmetries
+        )
 
     def test_parameters_reach_the_factory(self) -> None:
         system = build_system("nbody", {"softening": 0.2})
