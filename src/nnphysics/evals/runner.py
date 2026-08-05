@@ -18,7 +18,7 @@ disagreeing with the data a model was trained on.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from nnphysics.core.protocols import Predictor, System
     from nnphysics.core.types import FloatArray, MetricResult, Regime, State
     from nnphysics.data.manifest import Manifest
-    from nnphysics.evals.predictors import PredictorSpec
+    from nnphysics.evals.predictors import PredictorFactory, PredictorSpec
 
 __all__ = [
     "EVAL_SEED_STREAM",
@@ -183,6 +183,7 @@ def evaluate_predictor(  # noqa: PLR0913
     *,
     substeps: int,
     seed: int,
+    factories: Mapping[str, PredictorFactory] | None = None,
 ) -> PredictorResult:
     """Roll one predictor out from every case and score it.
 
@@ -193,6 +194,7 @@ def evaluate_predictor(  # noqa: PLR0913
         config: The suite.
         substeps: Solver steps per stored interval, from the dataset specification.
         seed: Root seed of the run.
+        factories: Predictor factories consulted before the registry.
 
     Returns:
         The aggregated result.
@@ -216,7 +218,9 @@ def evaluate_predictor(  # noqa: PLR0913
 
     for case in cases:
         steps = min(config.rollout_steps, case.steps)
-        predictor = build_case_predictor(system, case, parsed, substeps=substeps, seed=seed)
+        predictor = build_case_predictor(
+            system, case, parsed, substeps=substeps, seed=seed, factories=factories
+        )
         result = roll_out(
             predictor,
             case.initial,
@@ -272,6 +276,7 @@ def run_suite(  # noqa: PLR0913
     run_id: str,
     predictors: Sequence[str] | None = None,
     splits: Sequence[Split] | None = None,
+    factories: Mapping[str, PredictorFactory] | None = None,
 ) -> SuiteResult:
     """Run a whole suite and assemble the result.
 
@@ -285,6 +290,8 @@ def run_suite(  # noqa: PLR0913
         predictors: Predictor specifications, or `None` to use the suite's own.
         splits: Splits to evaluate on, or `None` for the test split and, if the dataset
             has one, the held out split.
+        factories: Predictor factories consulted before the registry, for a predictor
+            that cannot be registered, such as a model loaded from a checkpoint.
 
     Returns:
         The result, including the regime gap when both splits were evaluated.
@@ -320,6 +327,7 @@ def run_suite(  # noqa: PLR0913
                     config,
                     substeps=manifest.spec.substeps,
                     seed=seed,
+                    factories=factories,
                 )
             )
 
@@ -391,13 +399,16 @@ def _default_splits(manifest: Manifest) -> tuple[Split, ...]:
     return (_IN_DISTRIBUTION,)
 
 
-def build_case_predictor(
+def build_case_predictor(  # noqa: PLR0913
+    # The system, the case, what to build, how the solver folds and what seeds it, plus
+    # any factory the caller supplies rather than registers.
     system: System,
     case: EvaluationCase,
     spec: PredictorSpec,
     *,
     substeps: int,
     seed: int,
+    factories: Mapping[str, PredictorFactory] | None = None,
 ) -> Predictor:
     """Build the predictor for one case, with the reference solver already folded.
 
@@ -411,12 +422,14 @@ def build_case_predictor(
         spec: Parsed predictor specification.
         substeps: Solver steps per stored interval.
         seed: Root seed of the run.
+        factories: Predictor factories consulted before the registry, for a predictor
+            that cannot be registered, such as a model loaded from a checkpoint.
 
     Returns:
         The predictor.
 
     Raises:
-        UnknownNameError: If the predictor is not registered.
+        UnknownNameError: If the predictor is neither registered nor supplied.
         ValidationError: If the specification carries a setting the predictor refuses.
     """
     return build_predictor(
@@ -428,6 +441,7 @@ def build_case_predictor(
             seed=seed,
             stream=EVAL_SEED_STREAM.format(predictor=spec.name, trajectory=case.trajectory_id),
         ),
+        factories,
     )
 
 

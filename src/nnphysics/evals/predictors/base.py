@@ -121,22 +121,35 @@ def parse_spec(text: str) -> PredictorSpec:
     return PredictorSpec(name, parameters, text)
 
 
-def build_predictor(spec: PredictorSpec | str, context: PredictorContext) -> Predictor:
-    """Resolve a predictor specification against the registry and build it.
+def build_predictor(
+    spec: PredictorSpec | str,
+    context: PredictorContext,
+    factories: Mapping[str, PredictorFactory] | None = None,
+) -> Predictor:
+    """Resolve a predictor specification and build it.
+
+    The override exists for a predictor that cannot be in the registry. A trained model
+    is the example: this layer may not import the models layer, and a model is anyway not
+    a name but a file, so the caller that has one hands the factory in rather than
+    registering it. Nothing is added to the registry, so one run's model cannot become
+    visible to the next.
 
     Args:
         spec: A parsed specification, or the text of one.
         context: What the factory is allowed to know.
+        factories: Factories consulted before the registry, keyed by name.
 
     Returns:
         The predictor.
 
     Raises:
-        UnknownNameError: If no predictor is registered under that name.
+        UnknownNameError: If no predictor is registered or supplied under that name.
         ValidationError: If the specification is malformed or a parameter is rejected.
     """
     parsed = parse_spec(spec) if isinstance(spec, str) else spec
-    return PREDICTORS.get(parsed.name)(context, parsed.parameters)
+    supplied = factories.get(parsed.name) if factories else None
+    factory = supplied if supplied is not None else PREDICTORS.get(parsed.name)
+    return factory(context, parsed.parameters)
 
 
 def read_parameter(

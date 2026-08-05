@@ -52,7 +52,7 @@ def cases_of(
     )
 
 
-def capture(dataset: Dataset, **settings: int) -> SnapshotSet:
+def capture(dataset: Dataset, horizons: int = DEFAULT_HORIZONS) -> SnapshotSet:
     """Capture snapshots of both predictors on the test split."""
     _, manifest, config = dataset
     return capture_snapshots(
@@ -62,7 +62,7 @@ def capture(dataset: Dataset, **settings: int) -> SnapshotSet:
         config.evaluation,
         substeps=manifest.spec.substeps,
         seed=config.seed,
-        **settings,
+        horizons=horizons,
     )
 
 
