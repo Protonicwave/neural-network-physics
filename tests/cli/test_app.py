@@ -6,9 +6,11 @@ from typer.testing import CliRunner
 from nnphysics import __version__
 from nnphysics.cli.app import app
 
-SUBCOMMANDS = ("train", "evaluate", "report", "diagnose")
-"""Commands still waiting on the phase that fills them in. `data` is a group, tested in
-`tests/cli/test_data.py`."""
+SUBCOMMANDS = ("train", "report", "diagnose")
+"""Commands still waiting on the phase that fills them in."""
+
+GROUPS = ("data", "eval")
+"""Commands a phase has implemented, each tested in its own module."""
 EXAMPLE = Path(__file__).resolve().parents[2] / "configs" / "example.yaml"
 
 
@@ -20,7 +22,7 @@ def runner() -> CliRunner:
 def test_help_lists_every_subcommand(runner: CliRunner) -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in (*SUBCOMMANDS, "data"):
+    for name in (*SUBCOMMANDS, *GROUPS):
         assert name in result.stdout
 
 

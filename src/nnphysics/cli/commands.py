@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 
 from nnphysics.cli.data import app as data_app
+from nnphysics.cli.evals import app as eval_app
 from nnphysics.core.config import RunConfig, load_run_config
 from nnphysics.core.errors import NNPhysicsError
 
@@ -54,11 +55,6 @@ def train(config: ConfigOption = None) -> None:
     _announce("Train a surrogate", config)
 
 
-def evaluate(config: ConfigOption = None) -> None:
-    """Roll out predictors and score them with the evaluation suite."""
-    _announce("Evaluate predictors", config)
-
-
 def report(config: ConfigOption = None) -> None:
     """Render a report for a run and compare it with earlier runs."""
     _announce("Render a report", config)
@@ -76,5 +72,6 @@ def register(app: typer.Typer) -> None:
         app: The Typer application to register on.
     """
     app.add_typer(data_app)
-    for command in (train, evaluate, report, diagnose):
+    app.add_typer(eval_app)
+    for command in (train, report, diagnose):
         app.command()(command)

@@ -43,5 +43,28 @@ training:
   weight_decay: 0.0
 
 evaluation:
-  metrics: [placeholder]
-  rollout_steps: 256
+  name: standard
+  metrics:
+    - one_step_error
+    - rollout_error
+    - invariant_drift
+    - symmetry_violation
+    - distribution_drift
+  # Ground truth first, then every fixture that is wrong on purpose. The broken ones stay
+  # in the default suite because a metric's numbers only mean something next to theirs.
+  predictors:
+    - reference
+    - persistence
+    - linear_extrapolation
+    - noise
+    - energy_injection
+    - symmetry_break
+  rollout_steps: 255
+  n_initial_conditions: 4
+  error_thresholds: [0.01, 0.1, 1.0]
+  # Three declared symmetries, so each initial condition costs three extra rollouts. A
+  # thirty two step horizon keeps that affordable, and a violation that is not visible by
+  # then is not the kind this catches.
+  symmetry_steps: 32
+  distribution_window: 0.25
+  divergence_factor: 1000.0

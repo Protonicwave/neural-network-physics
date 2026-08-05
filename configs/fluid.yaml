@@ -42,5 +42,25 @@ training:
   weight_decay: 0.0
 
 evaluation:
-  metrics: [placeholder]
-  rollout_steps: 64
+  name: standard
+  metrics:
+    - one_step_error
+    - rollout_error
+    - invariant_drift
+    - symmetry_violation
+    - distribution_drift
+  predictors:
+    - reference
+    - persistence
+    - linear_extrapolation
+    - noise
+    - energy_injection
+    - symmetry_break
+  rollout_steps: 63
+  n_initial_conditions: 4
+  error_thresholds: [0.01, 0.1, 1.0]
+  # Two declared symmetries and a field a thousand times the size of an N-body state, so
+  # the equivariance horizon is shorter here than for the N-body suite.
+  symmetry_steps: 16
+  distribution_window: 0.25
+  divergence_factor: 1000.0
