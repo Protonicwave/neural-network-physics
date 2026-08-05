@@ -1,0 +1,66 @@
+# Default fluid dataset. The model and metric names are resolved against registries that
+# later phases fill in, so they do not name anything yet.
+name: fluid
+seed: 0
+output_dir: runs
+
+system:
+  name: fluid
+  parameters:
+    grid_size: 64
+    domain_length: 6.283185307179586
+
+data:
+  root: data
+  # Fewer and shorter than the N-body dataset: a 64 by 64 field is a thousand times the
+  # size of a 32 body state, and the store is sized by what fits the machine.
+  n_trajectories: 32
+  n_steps: 64
+  dt: 0.05
+  # Initial conditions carry unit root mean square speed, but the peak speed is what the
+  # CFL condition sees and the turbulent regime reaches 4.6 of it. Measured over these
+  # regimes on this grid, the tightest advective limit is 0.0106. Ten substeps put the
+  # solver at 0.005, which leaves a factor of two for a flow that speeds up further.
+  substeps: 10
+  # Two Reynolds numbers, 100 and 500, on the same grid.
+  regimes: [taylor_green, decaying_turbulence]
+  # A third Reynolds number and a different structure: sharp shear layers that roll up.
+  held_out_regimes: [shear_layer]
+  val_fraction: 0.15
+  test_fraction: 0.15
+  workers: null
+  shard_trajectories: 8
+  compression_level: 4
+
+model:
+  name: placeholder
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0
+
+evaluation:
+  name: standard
+  metrics:
+    - one_step_error
+    - rollout_error
+    - invariant_drift
+    - symmetry_violation
+    - distribution_drift
+  predictors:
+    - reference
+    - persistence
+    - linear_extrapolation
+    - noise
+    - energy_injection
+    - symmetry_break
+  rollout_steps: 63
+  n_initial_conditions: 4
+  error_thresholds: [0.01, 0.1, 1.0]
+  # Two declared symmetries and a field a thousand times the size of an N-body state, so
+  # the equivariance horizon is shorter here than for the N-body suite.
+  symmetry_steps: 16
+  distribution_window: 0.25
+  divergence_factor: 1000.0

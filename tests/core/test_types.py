@@ -122,6 +122,21 @@ class TestTrajectory:
         with pytest.raises(ValidationError, match="empty sequence"):
             Trajectory.from_states([])
 
+    def test_stacking_does_not_care_what_order_the_fields_were_built_in(self) -> None:
+        """A state is a mapping, so insertion order carries no physics.
+
+        Two states of the same system can reach a trajectory from different code paths,
+        a solver building one and a store reading the other, and rejecting the pair for
+        disagreeing on an order neither of them meant would be a false alarm.
+        """
+        first = State(fields={"q": np.zeros(2), "p": np.ones(2)}, time=0.0)
+        second = State(fields={"p": np.ones(2), "q": np.zeros(2)}, time=1.0)
+
+        trajectory = Trajectory.from_states([first, second])
+
+        assert len(trajectory) == 2
+        assert np.array_equal(trajectory.fields["p"], np.ones((2, 2)))
+
     def test_stacking_inconsistent_states_is_rejected(self) -> None:
         states = [make_state(time=0.0), State(fields={"q": np.zeros((3, 2))}, time=1.0)]
         with pytest.raises(ValidationError, match="state 1 has fields"):

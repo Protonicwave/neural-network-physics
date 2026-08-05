@@ -88,6 +88,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
+    "ANN401",  # a fixture that overrides configuration keys takes whatever they hold
     "D100",    # test modules do not need docstrings
     "D101",
     "D102",
@@ -107,6 +108,12 @@ files = ["src", "tests"]
 explicit_package_bases = true
 namespace_packages = true
 mypy_path = "src"
+
+# h5py ships no type information, so its own annotations cannot be checked. Ours still
+# are: everything crossing the boundary in `data/store.py` is annotated by hand.
+[[tool.mypy.overrides]]
+module = ["h5py.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

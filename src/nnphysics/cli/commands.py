@@ -1,8 +1,9 @@
 """The `nnp` subcommands.
 
-Every command is a placeholder until the phase that fills it in. Each states what it
-will do, and resolves the configuration if one is given, so the configuration boundary
-is exercised from the outside from the first phase.
+Each command that a phase has not reached yet is a placeholder. It states what it will
+do, and resolves the configuration if one is given, so the configuration boundary is
+exercised from the outside from the first phase. Implemented commands live in their own
+module and are attached here as a group.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from typing import Annotated
 
 import typer
 
+from nnphysics.cli.data import app as data_app
+from nnphysics.cli.evals import app as eval_app
 from nnphysics.core.config import RunConfig, load_run_config
 from nnphysics.core.errors import NNPhysicsError
 
@@ -47,19 +50,9 @@ def _announce(action: str, config: Path | None) -> None:
     typer.echo("Not implemented yet.")
 
 
-def generate(config: ConfigOption = None) -> None:
-    """Generate reference trajectories and write them to the data store."""
-    _announce("Generate trajectories", config)
-
-
 def train(config: ConfigOption = None) -> None:
     """Train a surrogate on generated trajectories."""
     _announce("Train a surrogate", config)
-
-
-def evaluate(config: ConfigOption = None) -> None:
-    """Roll out predictors and score them with the evaluation suite."""
-    _announce("Evaluate predictors", config)
 
 
 def report(config: ConfigOption = None) -> None:
@@ -78,5 +71,7 @@ def register(app: typer.Typer) -> None:
     Args:
         app: The Typer application to register on.
     """
-    for command in (generate, train, evaluate, report, diagnose):
+    app.add_typer(data_app)
+    app.add_typer(eval_app)
+    for command in (train, report, diagnose):
         app.command()(command)

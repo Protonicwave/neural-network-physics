@@ -65,24 +65,40 @@ class DataConfig(FrozenConfig):
     """Trajectory generation and splitting.
 
     Attributes:
-        root: Directory holding generated shards and their manifest.
+        root: Directory holding generated datasets.
         n_trajectories: Trajectories generated per regime.
-        n_steps: Steps recorded per trajectory.
-        dt: Time between recorded steps.
+        n_steps: States recorded per trajectory, the initial one included.
+        dt: Time between recorded states, which is the interval a surrogate learns.
+        substeps: Solver steps taken per recorded interval. The solver's own step is
+            `dt / substeps`, which is smaller than what is stored because stability
+            demands it and a surrogate should not have to pay for that.
         regimes: Regimes that training data is drawn from.
         held_out_regimes: Regimes never seen during training or model selection.
         val_fraction: Share of in distribution trajectories used for validation.
         test_fraction: Share of in distribution trajectories used for testing.
+        workers: Processes used for generation. `None` means cores minus one.
+        shard_trajectories: Trajectories per shard file, which bounds how much of a
+            dataset generation holds in memory at once.
+        compression_level: gzip level applied to stored arrays, zero for none.
     """
 
     root: Path = Path("data")
     n_trajectories: PositiveInt = 64
     n_steps: PositiveInt = 256
     dt: PositiveFloat = 0.01
+    substeps: PositiveInt = 1
     regimes: tuple[NonEmptyStr, ...] = Field(min_length=1)
     held_out_regimes: tuple[NonEmptyStr, ...] = Field(min_length=1)
     val_fraction: Fraction01 = 0.1
     test_fraction: Fraction01 = 0.1
+    workers: Annotated[int, Field(ge=1)] | None = None
+    shard_trajectories: PositiveInt = 16
+    compression_level: Annotated[int, Field(ge=0, le=9)] = 4
+
+    @property
+    def solver_dt(self) -> float:
+        """Step the reference solver actually takes."""
+        return self.dt / self.substeps
 
     @model_validator(mode="after")
     def _check_splits_and_regimes(self) -> Self:
@@ -91,6 +107,17 @@ class DataConfig(FrozenConfig):
         overlap = sorted(set(self.regimes) & set(self.held_out_regimes))
         if overlap:
             raise ValueError(f"regimes are both trained on and held out: {overlap}")
+        for field_name in ("regimes", "held_out_regimes"):
+            names = getattr(self, field_name)
+            if len(set(names)) != len(names):
+                raise ValueError(f"{field_name} names a regime more than once: {list(names)}")
+        # A split that rounds to nothing would silently stop being a split at all.
+        for name, fraction in (("val", self.val_fraction), ("test", self.test_fraction)):
+            if int(self.n_trajectories * fraction) < 1:
+                raise ValueError(
+                    f"{name}_fraction {fraction} of {self.n_trajectories} trajectories per "
+                    f"regime rounds down to an empty split"
+                )
         return self
 
 
@@ -123,15 +150,45 @@ class TrainingConfig(FrozenConfig):
 
 
 class EvaluationConfig(FrozenConfig):
-    """The evaluation suite.
+    """The evaluation suite: a named set of metrics and the settings they run under.
+
+    Naming the whole thing is what makes two runs comparable. A metric list on its own is
+    not a suite, because the same metric over a different horizon or a different number
+    of initial conditions answers a different question.
 
     Attributes:
-        metrics: Registered metric names to run.
+        name: Suite name, recorded in every result file.
+        metrics: Registered metric names to run, in reporting order.
+        predictors: Predictor specifications evaluated by default, each `name` or
+            `name:key=value`.
         rollout_steps: Steps each predictor is rolled out for.
+        n_initial_conditions: Trajectories drawn from each split to roll out from.
+        error_thresholds: Normalised error levels a horizon is reported for.
+        symmetry_steps: Steps the equivariance test rolls out for. Shorter than the main
+            rollout by default, because it costs one extra rollout per declared symmetry.
+        distribution_window: Fraction of the rollout, taken from its end, that
+            distributional statistics are computed over.
+        divergence_factor: How far past its initial scale a state may go before a rollout
+            is abandoned and the reason recorded.
     """
 
+    name: NonEmptyStr = "default"
     metrics: tuple[NonEmptyStr, ...] = Field(min_length=1)
+    predictors: tuple[NonEmptyStr, ...] = Field(default=("reference",), min_length=1)
     rollout_steps: PositiveInt = 256
+    n_initial_conditions: PositiveInt = 4
+    error_thresholds: tuple[PositiveFloat, ...] = Field(default=(0.01, 0.1, 1.0), min_length=1)
+    symmetry_steps: PositiveInt = 32
+    distribution_window: Fraction01 = 0.25
+    divergence_factor: PositiveFloat = 1.0e3
+
+    @model_validator(mode="after")
+    def _check_names_are_distinct(self) -> Self:
+        for field_name in ("metrics", "predictors"):
+            names = getattr(self, field_name)
+            if len(set(names)) != len(names):
+                raise ValueError(f"{field_name} names the same entry more than once: {list(names)}")
+        return self
 
 
 class RunConfig(FrozenConfig):
