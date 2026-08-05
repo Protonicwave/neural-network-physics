@@ -16,6 +16,7 @@ import typer
 
 from nnphysics.cli.data import app as data_app
 from nnphysics.cli.evals import app as eval_app
+from nnphysics.cli.report import app as report_app
 from nnphysics.core.config import RunConfig, load_run_config
 from nnphysics.core.errors import NNPhysicsError
 
@@ -55,11 +56,6 @@ def train(config: ConfigOption = None) -> None:
     _announce("Train a surrogate", config)
 
 
-def report(config: ConfigOption = None) -> None:
-    """Render a report for a run and compare it with earlier runs."""
-    _announce("Render a report", config)
-
-
 def diagnose(config: ConfigOption = None) -> None:
     """Explain a regression in a run by reading its report."""
     _announce("Diagnose a regression", config)
@@ -73,5 +69,6 @@ def register(app: typer.Typer) -> None:
     """
     app.add_typer(data_app)
     app.add_typer(eval_app)
-    for command in (train, report, diagnose):
+    app.add_typer(report_app)
+    for command in (train, diagnose):
         app.command()(command)
