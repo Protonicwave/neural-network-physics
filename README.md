@@ -107,3 +107,44 @@ results worth stating, all asserted in `tests/evals/test_sentinels.py`:
 - The predictor that rotates the world each step conserves every invariant and is perfectly
   equivariant under rotation. Only the symmetries it does not commute with reveal it, which
   is why every declared symmetry is tested and the worst is reported.
+
+## Reporting
+
+Render a run, list the history and compare runs:
+
+```sh
+uv run nnp report render  --config configs/nbody.yaml
+uv run nnp report list    --root runs --predictor reference
+uv run nnp report compare <baseline-run-id> <run-id> --threshold 0.05
+```
+
+`eval run` writes a run record beside its result file: the resolved configuration, the run
+identifier, the commit, the machine, the library versions, the timings, every metric output
+and the paths to the rest. `report render` turns that record into a Markdown report and a
+single HTML file with the plots embedded as data URIs, so one file can be sent to someone
+with nothing beside it. Both come from one document built once, and rendering the same
+record twice gives byte identical output.
+
+| Config | Evaluation | Rendering | Plots | HTML report |
+|---|---|---|---|---|
+| `configs/nbody.yaml` | 8 s | 5 s | 18 | 1.2 MB |
+| `configs/fluid.yaml` | 34 s | 4 s | 18 | 5.3 MB |
+
+Each run gets a directory under `runs/` holding `record.json`, the result file, the states
+kept for the qualitative plot, `plots/`, `report.md` and `report.html`. None of it is
+committed. The record carries a schema version and an old one is upgraded rather than
+refused, because a run whose numbers can no longer be read is a run that never happened.
+
+Four figures per split. Error against horizon, drift of every declared invariant against
+horizon with the declared tolerance shaded, the spread of the final error across
+trajectories so a mean cannot hide one bad initial condition, and the predicted state
+beside the true one at four horizons. The last of these knows no more physics than the
+metrics do: it draws a field of two component vectors in the plane and a two dimensional
+field as an image, choosing from the shape of the array rather than from the name of the
+system.
+
+Every number in a report is named, given units and explained in one line, and the direction
+that counts as an improvement is stated. A metric that produces a scalar nobody has
+explained stops the report rather than printing it bare. Comparison uses those directions:
+it reports an improvement, a regression or no change per scalar, declines to judge the ones
+whose ideal is neither extreme, and flags regressions above a threshold.
