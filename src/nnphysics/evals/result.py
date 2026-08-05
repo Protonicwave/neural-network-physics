@@ -8,12 +8,17 @@ and comparison is the entire point of phase 06.
 
 Plot data is kept. Rendering it is not this layer's business, but discarding it would
 force a re-run to draw a curve.
+
+A result carries a schema version and a reader upgrades an older one rather than refusing
+it. Results outlive the code that wrote them, and a run whose numbers can no longer be
+read is a run that never happened.
 """
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -31,11 +36,16 @@ __all__ = [
     "SuiteResult",
     "SuiteSettings",
     "read_result",
+    "upgrade_result",
     "write_result",
 ]
 
-RESULT_SCHEMA_VERSION = 1
-"""Bumped when the shape of this record changes incompatibly."""
+RESULT_SCHEMA_VERSION = 2
+"""Bumped when the shape of this record changes incompatibly.
+
+Version 2 added the per rollout scalars, without which a report can show the mean over
+trajectories but not the spread across them.
+"""
 
 
 class Record(BaseModel):
@@ -113,6 +123,9 @@ class RolloutRecord(Record):
         stop_reason: Why it ended.
         detail: What the predictor said, when it stopped by raising.
         seconds: Wall clock spent stepping.
+        scalars: Every metric scalar for this rollout alone, keyed `metric.scalar`. The
+            aggregated numbers are a mean over trajectories, and a mean hides the case
+            where one trajectory of four is the only one that went wrong.
     """
 
     trajectory: str = Field(min_length=1)
@@ -123,6 +136,7 @@ class RolloutRecord(Record):
     stop_reason: str = Field(min_length=1)
     detail: str = ""
     seconds: float = Field(ge=0.0)
+    scalars: dict[str, float] = {}
 
 
 class PredictorResult(Record):
@@ -225,18 +239,72 @@ def write_result(path: Path, result: SuiteResult) -> None:
     path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
+def _one_to_two(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 1 to 2: rollouts gained their own scalars.
+
+    An old rollout has none to give. Leaving them absent rather than inventing them is
+    what lets a report say the spread is unavailable instead of drawing a flat one.
+    """
+    return {**raw, "schema_version": 2}
+
+
+_UPGRADES: Mapping[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _one_to_two}
+"""One entry per version that can still be read, keyed by the version it upgrades from."""
+
+
+def upgrade_result(raw: dict[str, Any], *, source: str = "result") -> dict[str, Any]:
+    """Bring a serialised result up to the current schema version.
+
+    Args:
+        raw: The parsed JSON object.
+        source: What to name in an error message.
+
+    Returns:
+        An object at the current schema version. The input is not modified.
+
+    Raises:
+        ConfigurationError: If the version is missing, is not an integer, is newer than
+            this build reads, or is older than any upgrade covers.
+    """
+    version = raw.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ConfigurationError(f"{source} carries no integer result schema version")
+    if version > RESULT_SCHEMA_VERSION:
+        raise ConfigurationError(
+            f"{source} has result schema version {version}, newer than the version "
+            f"{RESULT_SCHEMA_VERSION} this build reads"
+        )
+    while version < RESULT_SCHEMA_VERSION:
+        upgrade = _UPGRADES.get(version)
+        if upgrade is None:
+            raise ConfigurationError(
+                f"{source} has result schema version {version}, which this build can no "
+                f"longer upgrade"
+            )
+        raw = upgrade(raw)
+        # An upgrade that did not move the version forward would loop for ever, so the
+        # chain checks its own step rather than trusting it.
+        moved = raw.get("schema_version")
+        if not isinstance(moved, int) or moved <= version:
+            raise ConfigurationError(
+                f"the upgrade from result schema version {version} left it at {moved!r}"
+            )
+        version = moved
+    return raw
+
+
 def read_result(path: Path) -> SuiteResult:
-    """Read and validate a suite result.
+    """Read a suite result, upgrading it if it was written by an older build.
 
     Args:
         path: File to read.
 
     Returns:
-        The result.
+        The result, at the current schema version.
 
     Raises:
-        ConfigurationError: If the file is missing, is not valid JSON, is of an
-            unsupported schema version, or fails validation.
+        ConfigurationError: If the file is missing, is not valid JSON, is not an object,
+            is of an unsupported schema version, or fails validation.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -246,12 +314,9 @@ def read_result(path: Path) -> SuiteResult:
         raw = json.loads(text)
     except json.JSONDecodeError as error:
         raise ConfigurationError(f"{path} is not valid JSON: {error}") from error
-    if isinstance(raw, dict) and raw.get("schema_version") != RESULT_SCHEMA_VERSION:
-        raise ConfigurationError(
-            f"{path} has result schema version {raw.get('schema_version')!r}, "
-            f"this build reads version {RESULT_SCHEMA_VERSION}"
-        )
+    if not isinstance(raw, dict):
+        raise ConfigurationError(f"{path} must hold a JSON object, got {type(raw).__name__}")
     try:
-        return SuiteResult.model_validate(raw)
+        return SuiteResult.model_validate(upgrade_result(raw, source=str(path)))
     except ValidationError as error:
         raise ConfigurationError(f"invalid result in {path}: {error}") from error

@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 __all__ = [
     "EVAL_SEED_STREAM",
     "EvaluationCase",
+    "build_case_predictor",
     "evaluate_predictor",
     "load_cases",
     "regime_gap",
@@ -215,7 +216,7 @@ def evaluate_predictor(  # noqa: PLR0913
 
     for case in cases:
         steps = min(config.rollout_steps, case.steps)
-        predictor = _build(system, case, parsed, substeps=substeps, seed=seed)
+        predictor = build_case_predictor(system, case, parsed, substeps=substeps, seed=seed)
         result = roll_out(
             predictor,
             case.initial,
@@ -229,7 +230,8 @@ def evaluate_predictor(  # noqa: PLR0913
             system=system.name,
         )
         metrics = build_metrics(config.metrics, _metric_context(system, case, predictor, config))
-        measured.append(tuple(metric.compute(rollout) for metric in metrics))
+        scored = tuple(metric.compute(rollout) for metric in metrics)
+        measured.append(scored)
         records.append(
             RolloutRecord(
                 trajectory=case.trajectory_id,
@@ -240,6 +242,7 @@ def evaluate_predictor(  # noqa: PLR0913
                 stop_reason=result.stop_reason.value,
                 detail=result.detail,
                 seconds=result.seconds,
+                scalars=_flatten(scored),
             )
         )
         seconds += result.seconds
@@ -388,7 +391,7 @@ def _default_splits(manifest: Manifest) -> tuple[Split, ...]:
     return (_IN_DISTRIBUTION,)
 
 
-def _build(
+def build_case_predictor(
     system: System,
     case: EvaluationCase,
     spec: PredictorSpec,
@@ -396,7 +399,26 @@ def _build(
     substeps: int,
     seed: int,
 ) -> Predictor:
-    """Build the predictor for one case, with the reference solver already folded."""
+    """Build the predictor for one case, with the reference solver already folded.
+
+    The seeding depends on the predictor and the trajectory alone, so building the same
+    predictor for the same case twice gives a predictor that produces the same states.
+    That is what lets a later pass reproduce a rollout instead of storing it.
+
+    Args:
+        system: The system, seen only through the protocol.
+        case: The initial condition and its ground truth.
+        spec: Parsed predictor specification.
+        substeps: Solver steps per stored interval.
+        seed: Root seed of the run.
+
+    Returns:
+        The predictor.
+
+    Raises:
+        UnknownNameError: If the predictor is not registered.
+        ValidationError: If the specification carries a setting the predictor refuses.
+    """
     return build_predictor(
         spec,
         PredictorContext(
@@ -488,6 +510,15 @@ def _aggregate(measured: Sequence[tuple[MetricResult, ...]]) -> tuple[MetricReco
             )
         )
     return tuple(records)
+
+
+def _flatten(results: Sequence[MetricResult]) -> dict[str, float]:
+    """Every scalar of one rollout, keyed `metric.scalar`."""
+    return {
+        f"{result.name}.{key}": value
+        for result in results
+        for key, value in sorted(result.scalars.items())
+    }
 
 
 def _mean_scalars(results: Sequence[MetricResult]) -> dict[str, float]:
