@@ -1,5 +1,6 @@
-# Default fluid dataset. The model and metric names are resolved against registries that
-# later phases fill in, so they do not name anything yet.
+# Default fluid dataset. The metrics are registered; the model is not, because the neural
+# operator for this system is phase 08. `nnp data` and `nnp eval` run against this file
+# today, `nnp train` will refuse it by name until that phase lands.
 name: fluid
 seed: 0
 output_dir: runs

@@ -1,5 +1,5 @@
-# Default N-body dataset. The model and metric names are resolved against registries
-# that later phases fill in, so they do not name anything yet.
+# The default N-body run: the dataset, the graph network trained on it and the suite
+# both are scored by. One file is the whole run, and its hash is the run identifier.
 name: nbody
 seed: 0
 output_dir: runs
@@ -34,13 +34,44 @@ data:
   compression_level: 4
 
 model:
-  name: placeholder
+  name: graph
+  hyperparameters:
+    # Thirty two bodies fully connected is a thousand edges per state, so the width is
+    # what sets the cost. Two rounds let a body feel the field of a body it is not
+    # directly reading, which is what many body means here.
+    hidden: 64
+    rounds: 2
 
 training:
-  epochs: 50
+  epochs: 40
   batch_size: 32
-  learning_rate: 0.001
+  learning_rate: 0.002
   weight_decay: 0.0
+  warmup_epochs: 2
+  final_learning_rate_fraction: 0.02
+  gradient_clip: 1.0
+  # Eight epochs without an improvement in the validation rollout. Long enough to survive
+  # the jump in the metric that each curriculum stage causes.
+  patience: 8
+  min_improvement: 0.0
+  # One step, then four, then eight. The lengthening is what makes the model stable over
+  # a long rollout, and it costs proportionally, so it starts late and ends short. It
+  # also starts after the learning rate has come well off its peak, because a stage
+  # change is the one moment in a run when the loss jumps.
+  curriculum: [1, 4, 8]
+  curriculum_epochs: [0, 18, 30]
+  # Fixed at sixteen whatever the curriculum is doing, so early stopping compares one
+  # epoch's number against another's rather than against a different question.
+  validation_steps: 16
+  # Below one, so that learning to stay on the rails over a window never costs more
+  # accuracy on the single step than it buys.
+  multi_step_weight: 0.5
+  physics_weight: 0.0
+  # Every eighth window rather than every one. Consecutive windows of a trajectory differ
+  # by one state out of hundreds, so the eight that are dropped teach almost nothing and
+  # cost an epoch eight times over.
+  window_stride: 8
+  loader_workers: 0
 
 evaluation:
   name: standard
