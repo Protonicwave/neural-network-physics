@@ -40,8 +40,8 @@ machine with the default worker count of cores minus one.
 
 | Config | Trajectories | States each | Stored step | Solver step | On disk | Generation |
 |---|---|---|---|---|---|---|
-| `configs/nbody.yaml` | 192, 64 per regime | 256 | 0.01 | 0.001 | 30 MB | 56 s |
-| `configs/fluid.yaml` | 96, 32 per regime | 64 | 0.05 | 0.005 | 122 MB | 89 s |
+| `configs/nbody.yaml` | 192, 64 per regime | 256 | 0.01 | 0.001 | 30 MB | 54 s |
+| `configs/fluid.yaml` | 96, 32 per regime | 64 | 0.05 | 0.005 | 122 MB | 62 s |
 
 The solver step is smaller than the stored one because stability and accuracy demand it,
 and the surrogate is not obliged to inherit that: the ratio is where its speedup comes
