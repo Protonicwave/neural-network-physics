@@ -33,13 +33,21 @@ __all__ = [
 
 
 class Conservation(StrEnum):
-    """How strictly an invariant is expected to hold under the reference solver."""
+    """How an invariant is expected to behave under the reference solver."""
 
     EXACT = "exact"
     """Conserved to round off, for example momentum under a symmetric integrator."""
 
     APPROXIMATE = "approximate"
     """Conserved only within a tolerance, for example energy under any integrator."""
+
+    DECAYING = "decaying"
+    """Not conserved: it must decrease, for example enstrophy under viscosity.
+
+    A quantity a dissipative system drains is still worth declaring, because the
+    direction is as strong a statement as conservation is: a predictor that lets it
+    grow is unphysical.
+    """
 
 
 @runtime_checkable
@@ -67,7 +75,12 @@ class Invariant(Protocol):
 
     @property
     def rtol(self) -> float:
-        """Relative drift over a reference rollout that is still acceptable."""
+        """How far the quantity may stray from its declared behaviour.
+
+        For a conserved quantity this is the relative drift over a reference rollout
+        that is still acceptable. For a decaying one it is the largest relative
+        increase that still counts as monotone.
+        """
         ...
 
     def evaluate(self, state: State) -> float:
@@ -161,9 +174,21 @@ class System(Protocol):
         """Named regions of parameter space this system declares."""
         ...
 
-    @property
-    def invariants(self) -> tuple[Invariant, ...]:
-        """Quantities the dynamics conserve."""
+    def invariants(self, regime: Regime) -> tuple[Invariant, ...]:
+        """Quantities the dynamics conserve or drain, in a given regime.
+
+        A regime can change what a quantity does, not only how fast. An inviscid
+        fluid conserves its enstrophy and a viscous one destroys it, so a system that
+        had to answer this without naming a regime could only answer it wrongly for
+        one of them. The reference solver is selected the same way, for the same
+        reason.
+
+        Args:
+            regime: The regime the invariants will be measured in.
+
+        Returns:
+            The invariants, in declaration order.
+        """
         ...
 
     @property

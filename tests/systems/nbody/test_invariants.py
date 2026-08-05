@@ -1,9 +1,10 @@
+from collections.abc import Callable
+
 import numpy as np
 import pytest
-from conftest import RollOut, TwoBody
 
-from nnphysics.core.protocols import Conservation, Invariant
-from nnphysics.core.types import State
+from nnphysics.core.protocols import Conservation, Invariant, Predictor
+from nnphysics.core.types import State, Trajectory
 from nnphysics.core.units import ENERGY, MOMENTUM
 from nnphysics.systems.nbody import (
     AngularMomentum,
@@ -19,6 +20,9 @@ EXACT = NBodyDynamics(gravitational_constant=1.0, softening=0.0)
 
 
 SOFTENED = NBodyDynamics(gravitational_constant=1.0, softening=0.05)
+
+RollOut = Callable[[Predictor, State, int], Trajectory]
+TwoBody = Callable[..., tuple[State, float]]
 
 
 def cluster(seed: int, n_bodies: int = 8) -> State:

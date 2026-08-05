@@ -1,9 +1,9 @@
 """The N-body system: the object every outer layer sees.
 
-Softening is a system level parameter rather than a regime one. The harness asks a system
-for its invariants without naming a regime, and the energy invariant has to know the
-potential it is measuring, so a softening that varied by regime would make the declared
-energy wrong for all but one of them.
+Softening is a system level parameter rather than a regime one. It changes the potential
+the energy invariant measures, and a regime is a statement about initial conditions
+rather than about the force law, so a softening that varied by regime would mean two
+regimes of the same system were not measuring the same energy.
 """
 
 from __future__ import annotations
@@ -60,9 +60,18 @@ class NBodySystem:
         """Named regions of parameter space this system declares."""
         return NBODY_REGIMES
 
-    @property
-    def invariants(self) -> tuple[Invariant, ...]:
-        """Energy, linear momentum and angular momentum."""
+    def invariants(self, regime: Regime) -> tuple[Invariant, ...]:  # noqa: ARG002
+        """Energy, linear momentum and angular momentum.
+
+        No regime changes what these three do, because softening is a system level
+        parameter rather than a regime one.
+
+        Args:
+            regime: The regime the invariants will be measured in.
+
+        Returns:
+            The three invariants.
+        """
         return (TotalEnergy(self.dynamics), LinearMomentum(), AngularMomentum())
 
     @property
