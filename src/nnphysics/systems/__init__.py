@@ -13,6 +13,9 @@ from nnphysics.systems.base import (
     float_parameter,
     int_parameter,
 )
+from nnphysics.systems.nbody import build_nbody
+
+SYSTEMS.add("nbody", build_nbody)
 
 __all__ = [
     "SYSTEMS",

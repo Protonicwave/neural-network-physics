@@ -1,7 +1,31 @@
 import pytest
 
-from nnphysics.core.errors import ValidationError
-from nnphysics.systems import check_parameter_names, float_parameter, int_parameter
+from nnphysics.core.errors import UnknownNameError, ValidationError
+from nnphysics.core.protocols import System
+from nnphysics.systems import (
+    SYSTEMS,
+    build_system,
+    check_parameter_names,
+    float_parameter,
+    int_parameter,
+)
+
+
+class TestRegistration:
+    def test_importing_the_layer_registers_nbody(self) -> None:
+        assert "nbody" in SYSTEMS
+
+    def test_a_registered_name_builds_a_system(self) -> None:
+        assert isinstance(build_system("nbody"), System)
+
+    def test_parameters_reach_the_factory(self) -> None:
+        system = build_system("nbody", {"softening": 0.2})
+        assert system.invariants[0].evaluate is not None
+        assert system.name == "nbody"
+
+    def test_an_unknown_name_is_rejected(self) -> None:
+        with pytest.raises(UnknownNameError, match="unknown system"):
+            build_system("quantum")
 
 
 class TestParameterReading:
