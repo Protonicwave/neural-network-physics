@@ -227,15 +227,23 @@ def evaluate_predictor(  # noqa: PLR0913
             steps,
             divergence_factor=config.divergence_factor,
         )
-        rollout = Rollout(
-            predicted=result.trajectory,
-            reference=_prefix(case.reference, len(result.trajectory)),
-            predictor=result.predictor,
-            system=system.name,
-        )
-        metrics = build_metrics(config.metrics, _metric_context(system, case, predictor, config))
-        scored = tuple(metric.compute(rollout) for metric in metrics)
-        measured.append(scored)
+        # A rollout that took no step at all is not a rollout with no error in it. Every
+        # metric on a single state reads zero, which is the best score there is, so a
+        # predictor that failed on its first step would be reported as flawless. It
+        # scores nothing instead, and the stop reason on the record says why.
+        scored: tuple[MetricResult, ...] = ()
+        if result.steps_completed > 0:
+            rollout = Rollout(
+                predicted=result.trajectory,
+                reference=_prefix(case.reference, len(result.trajectory)),
+                predictor=result.predictor,
+                system=system.name,
+            )
+            metrics = build_metrics(
+                config.metrics, _metric_context(system, case, predictor, config)
+            )
+            scored = tuple(metric.compute(rollout) for metric in metrics)
+            measured.append(scored)
         records.append(
             RolloutRecord(
                 trajectory=case.trajectory_id,
