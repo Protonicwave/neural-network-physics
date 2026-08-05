@@ -229,7 +229,10 @@ class Trajectory:
         """Stack a sequence of states into a trajectory.
 
         Args:
-            states: At least one state, all carrying the same field names.
+            states: At least one state, all carrying the same field names. The order the
+                names were inserted in does not matter: a state is a mapping, and two
+                states built by different code paths carry the same physics whichever
+                order their fields were written in.
 
         Returns:
             The stacked trajectory.
@@ -240,8 +243,9 @@ class Trajectory:
         if not states:
             raise ValidationError("cannot build a trajectory from an empty sequence of states")
         names = states[0].names
+        expected = set(names)
         for position, state in enumerate(states):
-            if state.names != names:
+            if set(state.names) != expected:
                 raise ValidationError(
                     f"state {position} has fields {state.names}, expected {names}"
                 )
