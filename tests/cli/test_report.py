@@ -335,3 +335,44 @@ def test_a_record_is_where_the_layout_says_it_is(evaluated: tuple[Path, RunConfi
     _, config, root = evaluated
 
     assert (root / run_paths(config).root.name / RECORD_NAME).is_file()
+
+
+class TestRenderingABenchmarkedRun:
+    """The last link in the chain.
+
+    `nnp benchmark` writes into the record, and `nnp report render` reads it back out
+    into a section and a figure.
+    """
+
+    @pytest.fixture
+    def benchmarked(self, tmp_path: Path) -> tuple[Path, RunConfig]:
+        path, config = write_config(tmp_path, name="cli-report-speed")
+        assert runner.invoke(app, ["eval", "run", "-c", str(path)]).exit_code == 0
+        result = runner.invoke(
+            app,
+            ["benchmark", "-c", str(path), "--trials", "2", "--warmup", "0", "--threads", "1"],
+        )
+        assert result.exit_code == 0, result.output
+        return path, config
+
+    def test_the_speed_section_and_its_figure_reach_the_report(
+        self, benchmarked: tuple[Path, RunConfig]
+    ) -> None:
+        path, config = benchmarked
+
+        result = runner.invoke(app, ["report", "render", "-c", str(path)])
+
+        assert result.exit_code == 0, result.output
+        paths = run_paths(config)
+        assert "Speed at matched accuracy" in paths.markdown.read_text(encoding="utf-8")
+        assert (paths.plots / "speed.png").is_file()
+
+    def test_the_html_still_references_nothing_outside_itself(
+        self, benchmarked: tuple[Path, RunConfig]
+    ) -> None:
+        path, config = benchmarked
+        assert runner.invoke(app, ["report", "render", "-c", str(path)]).exit_code == 0
+
+        html = run_paths(config).html.read_text(encoding="utf-8")
+
+        assert not EXTERNAL.search(html)
