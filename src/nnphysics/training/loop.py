@@ -21,6 +21,15 @@ a number the model is being optimised to reduce, which it can do without getting
 **The curriculum changes what an epoch trains on, so the loader is rebuilt when it does.**
 A stage of length four reads windows of five states, which is a different dataset from a
 stage of length one, not a different setting on the same one.
+
+**Early stopping waits for the last curriculum stage, and each stage gets its own
+patience.** Stopping early is a claim that more training of this kind will not help. A
+scheduled longer window is not more of the same kind, and it is the thing most likely to
+break the plateau that ran the counter up: measured on the fluid operator, the one step
+stage flattened at a validation rollout of 0.844 and the four step stage reached 0.731 in
+a single epoch. Without this, patience of ten against a stage change thirteen epochs later
+stopped that run before the stage that justified the curriculum ever ran, and the number
+reported would have been of a model the configuration never asked for.
 """
 
 from __future__ import annotations
@@ -138,23 +147,25 @@ def train_model(  # noqa: PLR0913
 
     training: DataLoader[Any] | None = None
     current_length = 0
+    previous_length: int | None = None
     windows = 0
     generator = torch.Generator()
 
     for epoch in range(state.epoch, config.epochs):
         started = time.perf_counter()
         length = stage_length(epoch, config.curriculum, config.curriculum_epochs, config.epochs)
+        if previous_length is not None and length != previous_length:
+            # The new stage gets its own patience. It has been given a harder problem
+            # than the one whose plateau ran the counter up, so the old stage's stalled
+            # epochs say nothing about it. The best error is not reset: model selection
+            # still has to be beaten.
+            stalled = 0
+        previous_length = length
         if training is None or length != current_length:
-            stage = _windows(
-                directory,
-                manifest,
-                Split.TRAIN,
-                sequence_length=length,
-                stride=config.window_stride,
+            training, windows = _stage_loader(
+                directory, manifest, config, length=length, seed=seed, generator=generator
             )
-            training = _loader(stage, config, seed=seed, shuffle=True, generator=generator)
             current_length = length
-            windows = len(stage)
             report(f"Curriculum stage of {length} step(s): {windows} training windows.")
 
         generator.manual_seed(_epoch_seed(seed, epoch))
@@ -191,17 +202,23 @@ def train_model(  # noqa: PLR0913
             f"{'  [best]' if improved else ''}"
         )
 
-        current = TrainingState(
-            epoch=epoch + 1,
-            best_error=best_error,
-            best_epoch=best_epoch,
-            stalled=stalled,
-            history=tuple(records),
-            seconds=elapsed,
+        _write(
+            checkpoints,
+            model,
+            optimiser,
+            scheduler,
+            TrainingState(
+                epoch=epoch + 1,
+                best_error=best_error,
+                best_epoch=best_epoch,
+                stalled=stalled,
+                history=tuple(records),
+                seconds=elapsed,
+            ),
+            improved=improved,
         )
-        _write(checkpoints, model, optimiser, scheduler, current, improved=improved)
 
-        if config.patience is not None and stalled >= config.patience:
+        if _should_stop(config, epoch=epoch, stalled=stalled):
             stopped_early = True
             report(f"Stopping: {stalled} epochs without an improvement.")
             break
@@ -223,6 +240,45 @@ def train_model(  # noqa: PLR0913
         stopped_early=stopped_early,
         seconds=elapsed,
     )
+
+
+def _should_stop(config: TrainingConfig, *, epoch: int, stalled: int) -> bool:
+    """Whether patience has run out, and whether it is yet entitled to.
+
+    Stopping early claims that more training of this kind will not help. While a longer
+    curriculum window is still scheduled, the next kind has not been tried, so patience
+    is not entitled to end a run before the configuration's own last stage has begun.
+
+    Args:
+        config: The training settings.
+        epoch: The epoch just completed.
+        stalled: Epochs since the validation metric last improved.
+
+    Returns:
+        Whether to stop.
+    """
+    if config.patience is None or stalled < config.patience:
+        return False
+    return epoch >= config.curriculum_epochs[-1]
+
+
+def _stage_loader(  # noqa: PLR0913
+    # Where the data is, what to read, how long a window is, what seeds it and which
+    # generator shuffles it. The generator is the loop's own, reseeded every epoch, so it
+    # has to be passed in rather than made here.
+    directory: Path,
+    manifest: Manifest,
+    config: TrainingConfig,
+    *,
+    length: int,
+    seed: int,
+    generator: torch.Generator,
+) -> tuple[DataLoader[Any], int]:
+    """The loader for one curriculum stage, and how many windows it holds."""
+    stage = _windows(
+        directory, manifest, Split.TRAIN, sequence_length=length, stride=config.window_stride
+    )
+    return _loader(stage, config, seed=seed, shuffle=True, generator=generator), len(stage)
 
 
 def _train_epoch(

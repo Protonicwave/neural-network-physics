@@ -155,6 +155,47 @@ def test_training_stops_when_patience_runs_out(
     assert len(history.epochs) < config.epochs
 
 
+def test_a_scheduled_curriculum_stage_always_runs(
+    dataset: Dataset, context: ModelContext, training: Trainer, tmp_path: Path
+) -> None:
+    """A plateau is the reason the next stage exists, so it must not pre-empt it.
+
+    The learning rate is small enough that no epoch improves, so patience of one would
+    stop at epoch one if it applied while a longer window was still scheduled. Training
+    reaches the four step stage instead, which is what the configuration asked for.
+    """
+    config = training(
+        epochs=10,
+        patience=1,
+        learning_rate=1e-9,
+        curriculum=(1, 4),
+        curriculum_epochs=(0, 5),
+    )
+
+    _, history = run(dataset, context, config, tmp_path, name="constant")
+
+    assert len(history.epochs) > 5
+    assert history.epochs[5].curriculum_steps == 4
+
+
+def test_the_last_stage_still_stops_when_its_own_patience_runs_out(
+    dataset: Dataset, context: ModelContext, training: Trainer, tmp_path: Path
+) -> None:
+    """The other half: waiting for the last stage must not turn early stopping off."""
+    config = training(
+        epochs=10,
+        patience=1,
+        learning_rate=1e-9,
+        curriculum=(1, 4),
+        curriculum_epochs=(0, 5),
+    )
+
+    _, history = run(dataset, context, config, tmp_path, name="constant")
+
+    assert history.stopped_early
+    assert len(history.epochs) < config.epochs
+
+
 def test_patience_of_none_runs_every_epoch(
     dataset: Dataset, context: ModelContext, training: Trainer, tmp_path: Path
 ) -> None:
