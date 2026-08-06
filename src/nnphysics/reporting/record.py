@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from nnphysics.core.config import RunConfig
 from nnphysics.core.errors import ConfigurationError
 from nnphysics.evals.result import SuiteResult, upgrade_result
+from nnphysics.evals.speed import SpeedReport
 from nnphysics.reporting.environment import EnvironmentRecord
 from nnphysics.training.history import TrainingHistory
 
@@ -40,8 +41,12 @@ __all__ = [
     "write_record",
 ]
 
-RECORD_SCHEMA_VERSION = 1
-"""Bumped when the shape of this record changes incompatibly."""
+RECORD_SCHEMA_VERSION = 2
+"""Bumped when the shape of this record changes incompatibly.
+
+Version 2 added the benchmark. A run that only evaluated carries none, and so does every
+record written before there was anything to carry.
+"""
 
 
 class RunRecord(BaseModel):
@@ -64,6 +69,10 @@ class RunRecord(BaseModel):
             that scores the reference solver and the broken baselines trains nothing and
             is still a run.
         evaluation: Every metric output.
+        benchmark: What the timings measured, or `None` for a run that was never
+            benchmarked. Separate from `timings`, which is how long this invocation took:
+            a benchmark is a measurement made on purpose, with warmups, repeats and a
+            fixed thread count, and the two should not be read as the same kind of number.
         artefacts: Role to path, relative to the run directory. Relative so that a run
             directory can be moved and still describe itself.
     """
@@ -81,6 +90,7 @@ class RunRecord(BaseModel):
     timings: dict[str, float] = {}
     training: TrainingHistory | None = None
     evaluation: SuiteResult
+    benchmark: SpeedReport | None = None
     artefacts: dict[str, str] = {}
 
     @property
@@ -120,9 +130,18 @@ def _evaluation_payload(raw: dict[str, Any]) -> dict[str, Any]:
     return {**raw, "evaluation": upgrade_result(evaluation, source="the embedded evaluation")}
 
 
-_UPGRADES: Mapping[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+def _one_to_two(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 1 to 2: a record may now carry a benchmark.
+
+    An old record has none. Leaving it absent rather than inventing an empty one is what
+    lets a report say the run was never benchmarked instead of drawing a speedup of one.
+    """
+    return {**raw, "schema_version": 2}
+
+
+_UPGRADES: Mapping[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _one_to_two}
 """One entry per record version that can still be read, keyed by the version it upgrades
-from. Empty while there has only ever been one shape of run record."""
+from."""
 
 
 def upgrade_record(raw: dict[str, Any], *, source: str = "record") -> dict[str, Any]:

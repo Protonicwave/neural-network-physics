@@ -73,6 +73,11 @@ training:
   window_stride: 8
   loader_workers: 0
 
+# Four models of this configuration, differing only in initialisation and shuffling.
+# Their disagreement is the uncertainty estimate.
+ensemble:
+  members: 4
+
 evaluation:
   name: standard
   metrics:
@@ -81,8 +86,11 @@ evaluation:
     - invariant_drift
     - symmetry_violation
     - distribution_drift
+    - calibration
   # Ground truth first, then every fixture that is wrong on purpose. The broken ones stay
   # in the default suite because a metric's numbers only mean something next to theirs.
+  # The last two state an uncertainty, one honestly and one a hundred times too small,
+  # and the calibration metric means nothing without both.
   predictors:
     - reference
     - persistence
@@ -90,6 +98,8 @@ evaluation:
     - noise
     - energy_injection
     - symmetry_break
+    - calibrated
+    - overconfident
   rollout_steps: 255
   n_initial_conditions: 4
   error_thresholds: [0.01, 0.1, 1.0]
@@ -99,3 +109,6 @@ evaluation:
   symmetry_steps: 32
   distribution_window: 0.25
   divergence_factor: 1000.0
+  # A tenth of the signal: the middle declared threshold, and the level a predictor's own
+  # uncertainty is asked to warn about before the error reaches it.
+  trust_threshold: 0.1

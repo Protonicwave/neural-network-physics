@@ -21,12 +21,16 @@ if TYPE_CHECKING:
     from nnphysics.core.config import RunConfig
 
 __all__ = [
+    "BENCHMARK_NAME",
+    "ENSEMBLE_LABEL",
+    "HISTORY_NAME",
     "HTML_NAME",
     "MARKDOWN_NAME",
     "PLOTS_DIR",
     "RECORD_NAME",
     "SNAPSHOTS_NAME",
     "RunPaths",
+    "ensemble_paths",
     "find_record",
     "find_records",
     "result_name",
@@ -47,6 +51,18 @@ HTML_NAME = "report.html"
 
 PLOTS_DIR = "plots"
 """Rendered figures. The HTML report embeds them, so it stays readable without them."""
+
+HISTORY_NAME = "training.json"
+"""What training recorded about itself. Written on its own by a run that trains without
+evaluating, so what it cost is not lost."""
+
+BENCHMARK_NAME = "benchmark.json"
+"""What the timings measured. Written beside the record as well as into it, so a
+benchmark can be read without parsing a run."""
+
+ENSEMBLE_LABEL = "ensemble"
+"""Marks the directory a deep ensemble writes to, so it cannot land on top of the
+directory of the member that happens to share its configuration."""
 
 
 def result_name(suite: str) -> str:
@@ -96,6 +112,16 @@ class RunPaths:
         """The plot directory."""
         return self.root / PLOTS_DIR
 
+    @property
+    def history(self) -> Path:
+        """What training recorded about itself."""
+        return self.root / HISTORY_NAME
+
+    @property
+    def benchmark(self) -> Path:
+        """What the timings measured."""
+        return self.root / BENCHMARK_NAME
+
     def result(self, suite: str) -> Path:
         """The evaluation result file of one suite.
 
@@ -142,6 +168,23 @@ def run_paths(config: RunConfig) -> RunPaths:
         The paths, which may not exist yet.
     """
     return RunPaths(config.run_dir)
+
+
+def ensemble_paths(config: RunConfig) -> RunPaths:
+    """Where a deep ensemble of a configuration writes its own artefacts.
+
+    Its own directory rather than a member's. Member zero is the plain run and hashes to
+    the same identifier the ensemble would, so without a label of its own the ensemble's
+    record would overwrite the record of one of the models it is made of.
+
+    Args:
+        config: The resolved run configuration, at any member index.
+
+    Returns:
+        The paths, which may not exist yet.
+    """
+    base = config.for_member(0)
+    return RunPaths(base.output_dir / f"{base.name}-{ENSEMBLE_LABEL}-{base.run_id}")
 
 
 def find_records(root: Path) -> tuple[Path, ...]:

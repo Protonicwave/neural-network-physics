@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nnphysics.core.errors import ValidationError
+from nnphysics.evals.benchmark import STABILITY_LIMIT
+from nnphysics.evals.speed import NEVER_PAYS
 from nnphysics.reporting.compare import Verdict
 from nnphysics.reporting.document import (
     Block,
@@ -72,6 +74,14 @@ visibly a gap rather than a zero."""
 _DIGITS = 4
 """Significant figures. Enough to see a change, few enough to read a row."""
 
+_MILLISECONDS = 1.0e3
+"""Timings are quoted in milliseconds per stored interval, because a step of a solver on
+this machine is a fraction of one and a table of leading zeros reads badly."""
+
+_SPEED_PLOT = "speed.png"
+"""The accuracy against wall clock figure, which belongs in the speed section rather than
+under a split."""
+
 
 def format_value(value: float, explanation: Explanation | None = None) -> str:
     """Format one number for a table.
@@ -119,6 +129,7 @@ def build_document(record: RunRecord, plots: Sequence[PlotRecord] = ()) -> Docum
     for split in record.splits:
         blocks.extend(_split_section(result, split, declared, plots))
     blocks.extend(_gap_section(result, declared))
+    blocks.extend(_speed_section(record, plots))
     blocks.extend(_incident_section(result))
     return Document(
         title=f"{record.name}: {result.system} on the {result.settings.name} suite",
@@ -583,6 +594,129 @@ def _gap_section(result: SuiteResult, declared: Mapping[str, InvariantRecord]) -
     ]
 
 
+def _speed_section(record: RunRecord, plots: Sequence[PlotRecord]) -> list[Block]:
+    """What the surrogate is worth against the solver, and when it pays for itself."""
+    report = record.benchmark
+    if report is None:
+        return [
+            Heading("Speed at matched accuracy"),
+            Paragraph(
+                "This run was not benchmarked, so it makes no claim about speed. Run "
+                "`nnp benchmark` against the same configuration to add one."
+            ),
+        ]
+    blocks: list[Block] = [
+        Heading("Speed at matched accuracy"),
+        Paragraph(
+            f"Timing the surrogate against the solver at the settings the data was "
+            f"generated with would flatter the surrogate, because those settings were "
+            f"chosen to make ground truth rather than to be fast. So the solver is "
+            f"measured at every substep count that divides {report.dataset_substeps}, and "
+            f"each surrogate is compared against the cheapest of those that is at least as "
+            f"accurate. Accuracy is the worst normalised error over {report.steps} steps "
+            f"from {report.n_initial_conditions} initial conditions on the "
+            f"{report.split} split. Every timing is the median of {report.trials} trials "
+            f"after {report.warmup} discarded warmups, on {report.threads} threads."
+        ),
+        Table(
+            headers=("predictor", "substeps", "worst error", "ms per step", "spread", "steady"),
+            rows=tuple(
+                (
+                    point.label,
+                    str(point.substeps) if point.substeps else MISSING,
+                    format_value(point.error),
+                    f"{point.seconds_per_step * _MILLISECONDS:.4g}",
+                    f"{point.relative_spread:.1%}",
+                    "yes" if point.stable else "no",
+                )
+                for point in (*report.ladder, *report.surrogates)
+            ),
+            caption="The accuracy against wall clock curve, as numbers. The rung that "
+            "produced ground truth has an error of zero by construction.",
+        ),
+    ]
+    if report.unstable:
+        blocks.append(
+            Paragraph(
+                f"The timing of {_join(report.unstable)} varied by more than "
+                f"{STABILITY_LIMIT:.0%} of its own median across the trials, so those "
+                f"medians are quoted with less confidence than the rest. A speedup read "
+                f"off them is worth about one significant figure."
+            )
+        )
+    if report.matched:
+        blocks.append(
+            Table(
+                headers=(
+                    "predictor",
+                    "matched substeps",
+                    "solver ms per step",
+                    "surrogate ms per step",
+                    "speedup",
+                    "bracketed",
+                ),
+                rows=tuple(
+                    (
+                        entry.predictor,
+                        str(entry.matched_substeps),
+                        f"{entry.matched_seconds_per_step * _MILLISECONDS:.4g}",
+                        f"{entry.seconds_per_step * _MILLISECONDS:.4g}",
+                        f"{entry.speedup:.4g}",
+                        "yes" if entry.bracketed else "no",
+                    )
+                    for entry in report.matched
+                ),
+                caption="Speedup above one means the surrogate is faster than the solver "
+                "at the same accuracy. Not bracketed means the ladder never got coarse "
+                "enough to be as inaccurate as the surrogate, so the solver could be run "
+                "cheaper still and the speedup is an upper bound.",
+            )
+        )
+    if report.costs:
+        blocks.append(
+            Table(
+                headers=(
+                    "predictor",
+                    "training (s)",
+                    "data (s)",
+                    "saving per rollout (s)",
+                    "break even (rollouts)",
+                ),
+                rows=tuple(
+                    (
+                        cost.predictor,
+                        f"{cost.training_seconds:.0f}",
+                        f"{cost.generation_seconds:.0f}",
+                        format_value(cost.saving_per_rollout),
+                        _break_even(cost.break_even_rollouts),
+                    )
+                    for cost in report.costs
+                ),
+                caption="What the surrogate cost once against what it saves each time. "
+                "The data cost is measured here rather than recalled: the intervals the "
+                "dataset holds, times what the solver costs for one of them on this "
+                "machine at this thread count.",
+            )
+        )
+    blocks.extend(
+        Figure(
+            source=f"{PLOTS_DIR}/{plot.name}",
+            alt=plot.title,
+            caption=f"{plot.title}. {plot.caption}",
+        )
+        for plot in plots
+        if plot.name == _SPEED_PLOT
+    )
+    return blocks
+
+
+def _break_even(rollouts: float) -> str:
+    """A break even count, or what it means when there is not one."""
+    if rollouts == NEVER_PAYS:
+        return "never: it is the slower of the two"
+    return f"{rollouts:.0f}"
+
+
 def _incident_section(result: SuiteResult) -> list[Block]:
     """Rollouts that did not finish, which a mean would otherwise hide."""
     rows = tuple(
@@ -650,6 +784,13 @@ def _worse(gap: float, direction: Direction) -> str:
     if direction is Direction.LOWER:
         return "worse" if gap > 0.0 else "better"
     return "better" if gap > 0.0 else "worse"
+
+
+def _join(names: Sequence[str]) -> str:
+    """A readable list of names."""
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def _direction(direction: Direction) -> str:
