@@ -21,6 +21,7 @@ from nnphysics.evals.metrics.base import (
 from nnphysics.evals.metrics.distribution import QUANTILES, DistributionDrift
 from nnphysics.evals.metrics.error import NEVER_REACHED, OneStepError, RolloutErrorGrowth
 from nnphysics.evals.metrics.invariants import REFERENCE_MARGIN, InvariantDrift
+from nnphysics.evals.metrics.resolution import ResolutionGeneralisation
 from nnphysics.evals.metrics.symmetry import SymmetryViolation
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "MetricContext",
     "MetricFactory",
     "OneStepError",
+    "ResolutionGeneralisation",
     "RolloutErrorGrowth",
     "SymmetryViolation",
     "build_metrics",
@@ -46,6 +48,7 @@ METRICS.add("rollout_error", RolloutErrorGrowth)
 METRICS.add("invariant_drift", InvariantDrift)
 METRICS.add("symmetry_violation", SymmetryViolation)
 METRICS.add("distribution_drift", DistributionDrift)
+METRICS.add("resolution_generalisation", ResolutionGeneralisation)
 
 DEFAULT_METRICS = (
     "one_step_error",
@@ -53,6 +56,7 @@ DEFAULT_METRICS = (
     "invariant_drift",
     "symmetry_violation",
     "distribution_drift",
+    "resolution_generalisation",
 )
 """Every metric, in the order a report reads best: what one step says, what a rollout
-says, and then the three that say what a rollout cannot."""
+says, and then the four that say what a rollout cannot."""

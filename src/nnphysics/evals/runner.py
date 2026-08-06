@@ -466,9 +466,11 @@ def _metric_context(
     return MetricContext(
         invariants=system.invariants(case.regime),
         symmetries=system.symmetries,
+        refinements=system.refinements,
         predictor=predictor,
         thresholds=config.error_thresholds,
         symmetry_steps=config.symmetry_steps,
+        resolution_steps=config.resolution_steps,
         distribution_window=config.distribution_window,
         divergence_factor=config.divergence_factor,
     )
@@ -496,6 +498,7 @@ def _settings(config: EvaluationConfig) -> SuiteSettings:
         n_initial_conditions=config.n_initial_conditions,
         error_thresholds=config.error_thresholds,
         symmetry_steps=config.symmetry_steps,
+        resolution_steps=config.resolution_steps,
         distribution_window=config.distribution_window,
         divergence_factor=config.divergence_factor,
     )

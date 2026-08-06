@@ -237,6 +237,8 @@ class EvaluationConfig(FrozenConfig):
         error_thresholds: Normalised error levels a horizon is reported for.
         symmetry_steps: Steps the equivariance test rolls out for. Shorter than the main
             rollout by default, because it costs one extra rollout per declared symmetry.
+        resolution_steps: Steps the resolution generalisation test rolls out for. Shorter
+            again, because that rollout works on a state several times the size.
         distribution_window: Fraction of the rollout, taken from its end, that
             distributional statistics are computed over.
         divergence_factor: How far past its initial scale a state may go before a rollout
@@ -250,6 +252,7 @@ class EvaluationConfig(FrozenConfig):
     n_initial_conditions: PositiveInt = 4
     error_thresholds: tuple[PositiveFloat, ...] = Field(default=(0.01, 0.1, 1.0), min_length=1)
     symmetry_steps: PositiveInt = 32
+    resolution_steps: PositiveInt = 16
     distribution_window: Fraction01 = 0.25
     divergence_factor: PositiveFloat = 1.0e3
 
