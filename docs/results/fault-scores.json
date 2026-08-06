@@ -1,0 +1,305 @@
+{
+  "created": "2026-08-06T15:35:23+00:00",
+  "system": "nbody",
+  "baseline_run": "9e286fe7985da402",
+  "agent": {
+    "model": "claude-opus-5 via a separate instance, unmetered",
+    "max_tokens": 16000,
+    "temperature": null,
+    "timeout_seconds": 120.0,
+    "max_attempts": 4,
+    "backoff_seconds": 1.0,
+    "input_price": 0.0,
+    "output_price": 0.0,
+    "prices_cached": ""
+  },
+  "provenance": "The seven fault runs, the baseline they are compared against and the `rule_based` card\nwere all produced by `nnp diagnose score --config configs/faults.yaml`, and reproducing\nthem needs nothing but this repository.\n\nThe `agent` card was not. No API credential was available on the machine this was run on,\nso each rendered context was given, on its own and with no access to this repository, to a\nseparate Claude instance holding only that text and the cause vocabulary. Its answer went\nback through the same validation and the same scoring code the agent path uses, via\n`RecordedClient`. Three things follow, and they are the reasons this card is labelled\nrather than presented as the measured result:\n\n- It is not reproducible from this repository. `nnp diagnose score` with a credential is,\n  and that is the command that should replace this card.\n- No tokens were counted, so the cost per diagnosis is absent rather than zero. The brief\n  asks for that number and this run does not have it.\n- The strict tool schema was not enforced by the API, only by this package's own\n  validation afterwards. Two of the seven answers carried extra keys the API would have\n  rejected outright.\n\nWhat the card does measure honestly is the ranking, because the true cause of every fault\nwas written down before any question was asked and the scoring code is the same for both\ndiagnosers.\n",
+  "cards": [
+    {
+      "source": "agent",
+      "model": "claude-opus-5 via a separate instance, unmetered",
+      "outcomes": [
+        {
+          "fault": "wrong_normalisation",
+          "true_cause": "normalisation_statistics",
+          "named": [
+            "normalisation_statistics",
+            "training_regime",
+            "random_seed",
+            "model_symmetry",
+            "rollout_curriculum"
+          ],
+          "rank": 1,
+          "confidence": 0.62,
+          "top_confidence": 0.62,
+          "next_check": "Compare the normalisation statistics the candidate used against the statistics recomputed from its own training data, and check whether the ratio reproduces the uniform 1.32x factor seen in one step error.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "broken_symmetry",
+          "true_cause": "model_symmetry",
+          "named": [
+            "model_symmetry",
+            "normalisation_statistics",
+            "random_seed"
+          ],
+          "rank": 1,
+          "confidence": 0.86,
+          "top_confidence": 0.86,
+          "next_check": "Apply a fixed rotation to one test initial condition and compare the model's single step prediction of the rotated state against the rotation of its prediction of the unrotated state.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "high_learning_rate",
+          "true_cause": "learning_rate",
+          "named": [
+            "learning_rate",
+            "optimiser_state",
+            "random_seed"
+          ],
+          "rank": 1,
+          "confidence": 0.95,
+          "top_confidence": 0.95,
+          "next_check": "Plot the candidate's per epoch training loss against the baseline's: if the learning rate is the fault the candidate curve will oscillate over orders of magnitude in the first epochs and fail to settle.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "wrong_regime",
+          "true_cause": "training_regime",
+          "named": [
+            "training_regime",
+            "normalisation_statistics",
+            "model_capacity",
+            "dataset_size"
+          ],
+          "rank": 1,
+          "confidence": 0.88,
+          "top_confidence": 0.88,
+          "next_check": "Compare the candidate's one step error on its own training regime against its one step error on the held out regimes.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "no_curriculum",
+          "true_cause": "rollout_curriculum",
+          "named": [
+            "rollout_curriculum",
+            "model_capacity",
+            "random_seed"
+          ],
+          "rank": 1,
+          "confidence": 0.93,
+          "top_confidence": 0.93,
+          "next_check": "Plot per step rollout error for both runs on the same initial conditions: the candidate should match the baseline at step one and then diverge with compounding growth.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "unstable_integrator",
+          "true_cause": "integrator_step_size",
+          "named": [
+            "integrator_step_size",
+            "training_regime",
+            "no_regression"
+          ],
+          "rank": 1,
+          "confidence": 0.93,
+          "top_confidence": 0.93,
+          "next_check": "Run the reference solver alone at substeps 5 and substeps 1 on one initial condition and compare total energy over the stored horizon.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "no_optimiser_state",
+          "true_cause": "optimiser_state",
+          "named": [
+            "random_seed",
+            "no_regression",
+            "optimiser_state"
+          ],
+          "rank": 3,
+          "confidence": 0.12,
+          "top_confidence": 0.62,
+          "next_check": "Re-run the candidate configuration with a third seed and compare the held out momentum figures. If they scatter over a similar order of magnitude with no configuration change, the difference is seed variance.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        }
+      ]
+    },
+    {
+      "source": "rule_based",
+      "model": "worst regressed metric",
+      "outcomes": [
+        {
+          "fault": "wrong_normalisation",
+          "true_cause": "normalisation_statistics",
+          "named": [
+            "integrator_step_size",
+            "model_symmetry",
+            "training_regime",
+            "learning_rate",
+            "rollout_curriculum"
+          ],
+          "rank": null,
+          "confidence": 0.0,
+          "top_confidence": 0.9999999999985011,
+          "next_check": "Look at the invariant_drift metric, which regressed most.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "broken_symmetry",
+          "true_cause": "model_symmetry",
+          "named": [
+            "integrator_step_size",
+            "rollout_curriculum",
+            "model_symmetry",
+            "learning_rate",
+            "training_regime"
+          ],
+          "rank": 3,
+          "confidence": 2.093878279866015e-6,
+          "top_confidence": 0.49999895074566164,
+          "next_check": "Look at the invariant_drift metric, which regressed most.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "high_learning_rate",
+          "true_cause": "learning_rate",
+          "named": [
+            "integrator_step_size",
+            "rollout_curriculum",
+            "training_regime",
+            "learning_rate"
+          ],
+          "rank": 4,
+          "confidence": 2.354911498980997e-13,
+          "top_confidence": 0.49999999999943473,
+          "next_check": "Look at the invariant_drift metric, which regressed most.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "wrong_regime",
+          "true_cause": "training_regime",
+          "named": [
+            "integrator_step_size",
+            "normalisation_statistics",
+            "rollout_curriculum",
+            "learning_rate"
+          ],
+          "rank": null,
+          "confidence": 0.0,
+          "top_confidence": 0.33333333332835247,
+          "next_check": "Look at the invariant_drift metric, which regressed most.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "no_curriculum",
+          "true_cause": "rollout_curriculum",
+          "named": [
+            "integrator_step_size",
+            "rollout_curriculum",
+            "training_regime",
+            "model_symmetry"
+          ],
+          "rank": 2,
+          "confidence": 0.4999999999992675,
+          "top_confidence": 0.4999999999992675,
+          "next_check": "Look at the invariant_drift metric, which regressed most.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "unstable_integrator",
+          "true_cause": "integrator_step_size",
+          "named": [
+            "integrator_step_size"
+          ],
+          "rank": 1,
+          "confidence": 1.0,
+          "top_confidence": 1.0,
+          "next_check": "Look at the invariant_drift metric, which regressed most.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        },
+        {
+          "fault": "no_optimiser_state",
+          "true_cause": "optimiser_state",
+          "named": [
+            "integrator_step_size",
+            "training_regime",
+            "model_symmetry"
+          ],
+          "rank": null,
+          "confidence": 0.0,
+          "top_confidence": 0.9521955989694031,
+          "next_check": "Look at the invariant_drift metric, which regressed most.",
+          "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "dollars": 0.0,
+            "attempts": 0
+          }
+        }
+      ]
+    }
+  ]
+}
