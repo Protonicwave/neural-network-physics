@@ -97,11 +97,17 @@ class RolloutErrorGrowth:
             "error.mean": float(np.mean(aggregate)),
             "duration": float(times[-1] - times[0]),
         }
-        for threshold in self.context.thresholds:
-            scalars[f"horizon.{threshold:g}"] = _first_crossing(aggregate, times, threshold)
+        horizons = [f"horizon.{threshold:g}" for threshold in self.context.thresholds]
+        for key, threshold in zip(horizons, self.context.thresholds, strict=True):
+            scalars[key] = _first_crossing(aggregate, times, threshold)
         series: dict[str, FloatArray] = {"error": aggregate, "time": times}
         series.update({f"error.{name}": values for name, values in per_field.items()})
-        return MetricResult(name=self.name, scalars=scalars, series=series)
+        return MetricResult(
+            name=self.name,
+            scalars=scalars,
+            series=series,
+            sentinels=dict.fromkeys(horizons, NEVER_REACHED),
+        )
 
 
 def _first_crossing(error: FloatArray, times: FloatArray, threshold: float) -> float:

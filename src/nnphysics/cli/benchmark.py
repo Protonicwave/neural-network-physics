@@ -28,11 +28,16 @@ from nnphysics.core.config import RunConfig, load_run_config
 from nnphysics.core.errors import NNPhysicsError
 from nnphysics.data.layout import MANIFEST_NAME, dataset_dir
 from nnphysics.data.manifest import Split, read_manifest
-from nnphysics.evals.benchmark import DEFAULT_TRIALS, DEFAULT_WARMUP, STABILITY_LIMIT
+from nnphysics.evals.benchmark import (
+    DEFAULT_STEPS_PER_TRIAL,
+    DEFAULT_TRIALS,
+    DEFAULT_WARMUP,
+    STABILITY_LIMIT,
+)
 from nnphysics.evals.runner import load_cases
 from nnphysics.evals.speed import NEVER_PAYS, SpeedReport, build_speed_report
 from nnphysics.models import Ensemble, load_model
-from nnphysics.reporting.layout import RunPaths, run_paths
+from nnphysics.reporting.layout import RunPaths, ensemble_paths, run_paths
 from nnphysics.reporting.record import read_record, write_record
 from nnphysics.systems import build_system
 from nnphysics.training import read_history
@@ -90,12 +95,23 @@ def benchmark(  # noqa: PLR0913, PLR0917
     warmup: Annotated[
         int, typer.Option("--warmup", help="Repeats discarded before timing begins.")
     ] = DEFAULT_WARMUP,
+    steps: Annotated[
+        int,
+        typer.Option(
+            "--steps",
+            help="Steps each trial averages over. Raise it where one step is short "
+            "enough that the operating system's own jitter is a large part of it.",
+        ),
+    ] = DEFAULT_STEPS_PER_TRIAL,
 ) -> None:
     """Measure the speedup a surrogate delivers at matched accuracy."""
     resolved = _resolve(config)
     fixed = _fix_threads(threads)
     directory = dataset_dir(resolved)
-    paths = run_paths(resolved)
+    # An ensemble's numbers belong to the run that scored the ensemble. Writing them into
+    # the directory of member zero, which is a different predictor, would attach a
+    # benchmark to a record that never measured the thing benchmarked.
+    paths = ensemble_paths(resolved) if ensemble else run_paths(resolved)
 
     started = time.perf_counter()
     try:
@@ -109,10 +125,11 @@ def benchmark(  # noqa: PLR0913, PLR0917
             count=resolved.evaluation.n_initial_conditions,
             steps=resolved.evaluation.rollout_steps,
         )
-        factories, costs = _surrogates(resolved, paths, checkpoint, ensemble=ensemble)
+        factories, costs = _surrogates(resolved, run_paths(resolved), checkpoint, ensemble=ensemble)
         typer.echo(
             f"Timing the {resolved.system.name} solver from {manifest.spec.substeps} "
-            f"substeps down, on {fixed} threads, {trials} trials after {warmup} warmups."
+            f"substeps down, on {fixed} threads, {trials} trials of {steps} steps after "
+            f"{warmup} warmups."
         )
         report = build_speed_report(
             system,
@@ -128,6 +145,7 @@ def benchmark(  # noqa: PLR0913, PLR0917
             threads=fixed,
             trials=trials,
             warmup=warmup,
+            steps_per_trial=steps,
         )
         _write(paths, report, seconds=time.perf_counter() - started)
     except NNPhysicsError as error:
@@ -155,7 +173,11 @@ def summarise_speed(report: SpeedReport) -> None:
             f"+-{point.relative_spread:.1%}{flag}"
         )
     for matched, cost in zip(report.matched, report.costs, strict=True):
-        bound = "" if matched.bracketed else ", an upper bound: the ladder went no coarser"
+        bound = (
+            ""
+            if matched.bracketed
+            else ", the cheapest setting that runs: nothing measured was as inaccurate"
+        )
         typer.echo(
             f"  {matched.predictor}: {matched.speedup:.3g}x the solver at "
             f"{matched.matched_substeps} substeps{bound}."

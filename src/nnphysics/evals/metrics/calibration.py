@@ -134,7 +134,17 @@ class Calibration:
             "error": error,
             "time": times,
         }
-        return MetricResult(name=self.name, scalars=scalars, series=series)
+        return MetricResult(
+            name=self.name,
+            scalars=scalars,
+            series=series,
+            sentinels={
+                "horizon.error": NEVER_REACHED,
+                "horizon.spread": NEVER_REACHED,
+                "warning_lead": NOT_DETERMINED,
+                "spread_error_correlation": UNDEFINED_CORRELATION,
+            },
+        )
 
 
 def _standardised(predicted: Trajectory, reference: Trajectory, spread: Trajectory) -> FloatArray:

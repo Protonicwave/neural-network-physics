@@ -79,10 +79,14 @@ def prepared(tmp_path: Path) -> tuple[Path, RunConfig]:
     return path, config
 
 
-def report_of(config: RunConfig) -> SpeedReport:
-    return SpeedReport.model_validate(
-        json.loads(run_paths(config).benchmark.read_text(encoding="utf-8"))
-    )
+def report_of(config: RunConfig, *, ensemble: bool = False) -> SpeedReport:
+    """Read the report back from wherever the benchmark put it.
+
+    An ensemble's numbers go to the run that scored the ensemble, not to the directory of
+    member zero, which is a different predictor.
+    """
+    paths = ensemble_paths(config) if ensemble else run_paths(config)
+    return SpeedReport.model_validate(json.loads(paths.benchmark.read_text(encoding="utf-8")))
 
 
 class TestTheSolverAlone:
@@ -214,7 +218,9 @@ class TestTheEnsembleIsTimedToo:
         result = runner.invoke(app, ["benchmark", "--config", str(path), "--ensemble", *FAST])
 
         assert result.exit_code == 0, result.output
-        assert "ensemble" in {point.predictor for point in report_of(config).surrogates}
+        surrogates = report_of(config, ensemble=True).surrogates
+        assert "ensemble" in {point.predictor for point in surrogates}
+        assert not run_paths(config).benchmark.exists()
 
     def test_its_training_cost_is_what_every_member_cost(
         self, runner: CliRunner, prepared: tuple[Path, RunConfig]
@@ -231,7 +237,7 @@ class TestTheEnsembleIsTimedToo:
             == 0
         )
 
-        costs = {cost.predictor: cost for cost in report_of(config).costs}
+        costs = {cost.predictor: cost for cost in report_of(config, ensemble=True).costs}
         members = [
             run_paths(config.for_member(index)).history for index in range(config.ensemble.members)
         ]

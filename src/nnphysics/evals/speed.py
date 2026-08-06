@@ -36,6 +36,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from nnphysics.core.errors import ValidationError
+from nnphysics.core.types import Trajectory
 from nnphysics.evals.benchmark import (
     DEFAULT_STEPS_PER_TRIAL,
     DEFAULT_TRIALS,
@@ -51,7 +52,6 @@ from nnphysics.evals.runner import build_case_predictor, substepped_reference
 if TYPE_CHECKING:
     from nnphysics.core.config import EvaluationConfig
     from nnphysics.core.protocols import Predictor, System
-    from nnphysics.core.types import Trajectory
     from nnphysics.evals.predictors import PredictorFactory
     from nnphysics.evals.runner import EvaluationCase
 
@@ -134,10 +134,11 @@ class MatchedSpeedup(Record):
         matched_seconds_per_step: What that setting costs.
         speedup: Solver cost divided by surrogate cost. Above one means the surrogate is
             faster at the same accuracy, which is the whole claim.
-        bracketed: Whether a cheaper solver setting was measured that is genuinely worse
-            than the surrogate. False means the ladder ran out before the surrogate's
-            accuracy was reached from below, so the solver could be run cheaper still and
-            the speedup is an upper bound rather than a measurement.
+        bracketed: Whether the crossing was caught between two measured settings, with a
+            cheaper one genuinely worse than the surrogate. False means no setting that
+            runs was as inaccurate as the surrogate: it sits off the bottom of the
+            accuracy axis, and the speedup is quoted against the cheapest setting the
+            solver has rather than against one of equal accuracy, because there is none.
     """
 
     predictor: str = Field(min_length=1)

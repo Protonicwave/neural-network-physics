@@ -31,6 +31,30 @@ class Refusing:
         raise NumericalError(f"unstable at t={current.time}")
 
 
+class Stalling:
+    """Takes a few steps and then refuses, which is what a diverging surrogate does."""
+
+    dt = 0.5
+
+    def __init__(self, after: int) -> None:
+        self._after = after
+        self._taken = 0
+
+    @property
+    def name(self) -> str:
+        return "stalling"
+
+    def step(self, current: State) -> State:
+        if self._taken >= self._after:
+            self._taken = 0
+            raise NumericalError(f"stopped at t={current.time}")
+        self._taken += 1
+        return State(
+            fields={name: array * 1.5 for name, array in current.fields.items()},
+            time=current.time + self.dt,
+        )
+
+
 def case() -> EvaluationCase:
     """One initial condition with four steps of ground truth after it."""
     times = np.arange(5, dtype=np.float64) * Refusing.dt
@@ -106,6 +130,32 @@ class TestARungThatCannotRun:
         )
 
         assert measured is None
+
+
+class TestARolloutThatStopsPartWay:
+    def test_it_is_scored_over_the_steps_it_managed(self) -> None:
+        """A diverging surrogate is the ordinary case on the fluid, not an edge one.
+
+        The error is taken over the prefix that ran, and the point records that it did
+        not finish. Truncating ground truth to match is the step this exercises.
+        """
+        measured = measure_point(
+            [Stalling(after=2)],
+            [case()],
+            steps=4,
+            label="stalling",
+            kind="surrogate",
+            substeps=0,
+            threads=1,
+            trials=1,
+            warmup=0,
+            steps_per_trial=4,
+            divergence_factor=1.0e3,
+        )
+
+        assert measured is not None
+        assert not measured.completed
+        assert measured.error > 0.0
 
 
 class TestMatchedAccuracy:

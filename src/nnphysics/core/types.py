@@ -361,14 +361,29 @@ class MetricResult:
         name: Name of the metric that produced this result.
         scalars: Named scalar values, the numbers that go in a report table.
         series: Named one dimensional arrays over rollout steps, for plots.
+        sentinels: For each scalar that has one, the value standing for a thing that did
+            not happen rather than for a measurement of it. A horizon that was never
+            reached is the example.
+
+            Declared because these numbers are averaged over initial conditions, and a
+            mean of one rollout that crossed a threshold at 0.3 and three that never
+            crossed it at all is not a horizon of anything. Whoever averages them has to
+            know which values are not quantities, and only the metric can say.
     """
 
     name: str
     scalars: Mapping[str, float]
     series: Mapping[str, FloatArray] = field(default_factory=dict)
+    sentinels: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValidationError("a metric result must carry the metric name")
         object.__setattr__(self, "scalars", MappingProxyType(dict(self.scalars)))
         object.__setattr__(self, "series", MappingProxyType(dict(self.series)))
+        unknown = sorted(set(self.sentinels) - set(self.scalars))
+        if unknown:
+            raise ValidationError(
+                f"metric {self.name!r} declares sentinels for scalars it did not produce: {unknown}"
+            )
+        object.__setattr__(self, "sentinels", MappingProxyType(dict(self.sentinels)))

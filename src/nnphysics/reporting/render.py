@@ -679,9 +679,10 @@ def _speed_section(record: RunRecord, plots: Sequence[PlotRecord]) -> list[Block
                     for entry in report.matched
                 ),
                 caption="Speedup above one means the surrogate is faster than the solver "
-                "at the same accuracy. Not bracketed means the ladder never got coarse "
-                "enough to be as inaccurate as the surrogate, so the solver could be run "
-                "cheaper still and the speedup is an upper bound.",
+                "at the same accuracy. Not bracketed means no solver setting that runs "
+                "was as inaccurate as the surrogate: it sits off the bottom of the "
+                "accuracy axis, and its speedup is quoted against the cheapest setting "
+                "the solver has rather than against one of equal accuracy.",
             )
         )
     if report.costs:

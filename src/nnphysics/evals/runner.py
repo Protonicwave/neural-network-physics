@@ -568,12 +568,28 @@ def _flatten(results: Sequence[MetricResult]) -> dict[str, float]:
 
 
 def _mean_scalars(results: Sequence[MetricResult]) -> dict[str, float]:
-    """Mean of each named scalar, over the results that carry it."""
+    """Mean of each named scalar, over the rollouts that measured it.
+
+    A value a metric declared as a sentinel is left out of its own mean. A horizon that
+    three rollouts never reached and one crossed at 0.3 is not a horizon of 0.075, and it
+    is not a horizon of anything else either: it is one measurement and three statements
+    that there was nothing to measure. Averaging the sentinel in would turn a number that
+    means "this did not happen" into a contribution to a number that means "this happened
+    at". Where no rollout measured it, the sentinel is what is reported, which is the
+    honest summary.
+    """
     collected: dict[str, list[float]] = {}
+    sentinels: dict[str, float] = {}
     for result in results:
+        sentinels.update(result.sentinels)
         for key, value in result.scalars.items():
             collected.setdefault(key, []).append(value)
-    return {key: float(np.mean(values)) for key, values in sorted(collected.items())}
+    averaged: dict[str, float] = {}
+    for key, values in sorted(collected.items()):
+        sentinel = sentinels.get(key)
+        measured = [value for value in values if value != sentinel]
+        averaged[key] = float(np.mean(measured)) if measured else float(values[0])
+    return averaged
 
 
 def _mean_series(results: Sequence[MetricResult]) -> dict[str, tuple[float, ...]]:
