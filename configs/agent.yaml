@@ -1,0 +1,32 @@
+# How the diagnosis agent calls the model.
+#
+# Separate from a run configuration on purpose. A run identifier is a hash of the
+# configuration that produced the weights, and which model was later asked to explain them
+# changes nothing about them; folding this in would move the identifier of every run that
+# already exists.
+
+# No default lives in the source. A model identifier hardcoded in a repository is a
+# repository that outlives its own model.
+model: claude-opus-5
+
+# Generous, because thinking counts against this budget and a diagnosis that ran out
+# halfway is not a shorter diagnosis, it is a failed request.
+max_tokens: 16000
+
+# Left unset. Recent models reject the parameter outright, so sending one unasked would
+# fail every request against them. Set a number here only for a model that accepts one.
+temperature: null
+
+timeout_seconds: 120.0
+# Four attempts against a rate limit or an overloaded service, doubling the wait each
+# time. A fault suite makes one request per fault and a retry costs a second, not a run.
+max_attempts: 4
+backoff_seconds: 1.0
+
+# Dollars per million tokens, from the published pricing on the date below. Configuration
+# rather than a constant in the code, because a price is a fact about a pricing page on a
+# particular day. The token counts beside every reported cost are what was actually
+# measured; this only turns them into money.
+input_price: 5.0
+output_price: 25.0
+prices_cached: "2026-08-06"
