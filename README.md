@@ -453,6 +453,19 @@ The right hand column is the spread of the median across eight repeats of the wh
 benchmark, which is the larger and more honest number: it is what the claim has to survive,
 and on a laptop with a browser open it is large.
 
+**The stability criterion this phase set itself was mostly not met, and the tables say
+so.** A timing whose interquartile range exceeds a tenth of its own median is marked
+unstable in the run record and in the rendered report. Early in the session, with the
+machine quiet, one N-body benchmark had every point inside that and the fluid solver's
+points read 2 to 7 per cent. Two hours later, with a browser running and the processor
+warm, none of sixteen consecutive runs across the two systems had every point inside it,
+and the absolute timings drifted by a factor of two in both directions.
+
+Rather than quote whichever repeat happened to look clean, the numbers below are medians
+over eight repeats with the range beside them, and every conclusion drawn from them is one
+that survives the range. Where a conclusion would not survive it, that is said instead of a
+number.
+
 N-body, 255 steps from four initial conditions:
 
 | Predictor | worst error | median ms per step | spread over 8 repeats |
@@ -564,10 +577,11 @@ the four fluid members 0.576, 0.513, 0.569 and 0.548, so they did land in differ
 | Fluid, test | `ensemble` | 0.167 | 979 | 2 of 4 |
 
 **Averaging four models helps where the models were working and does not rescue one that
-was not.** On the N-body test split the ensemble improves every accuracy number: a fifth
-off the one step error and a final error of 1.30 against the single network's 2.08. It is
-still above the 1.04 of persistence at the end of the rollout, so the point made in the
-phase 07 numbers stands, but the gap has closed from a factor of two to a fifth.
+was not.** On the N-body test split the ensemble improves every accuracy number: 0.044
+against the single network's 0.053 over one step, and 1.30 against its 2.08 at the end. It
+is still worse than the 1.04 of persistence at the end of the rollout, so the warning made
+in the phase 07 numbers stands, but it has gone from twice persistence to a quarter above
+it.
 
 On the held out regime and on the fluid it changes nothing worth having. Four models that
 all diverge produce a mean that also diverges, and on the N-body held out regime it
