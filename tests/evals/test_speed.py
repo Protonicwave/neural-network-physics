@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import pytest
+
+from nnphysics.core.errors import ValidationError
+from nnphysics.evals.speed import (
+    NEVER_PAYS,
+    MatchedSpeedup,
+    SpeedPoint,
+    cost_accounting,
+    matched_speedup,
+    substep_ladder,
+)
+
+
+def point(substeps: int, error: float, seconds: float, *, kind: str = "solver") -> SpeedPoint:
+    """One measured point, with the fields a comparison does not read left benign."""
+    return SpeedPoint(
+        label=f"{kind}:{substeps}",
+        predictor="reference" if kind == "solver" else "surrogate",
+        kind=kind,
+        substeps=substeps,
+        error=error,
+        seconds_per_step=seconds,
+        iqr=0.0,
+        relative_spread=0.0,
+        stable=True,
+        completed=True,
+    )
+
+
+# A solver that is cheaper and worse as it is coarsened, and exact at the setting that
+# produced ground truth. That shape is what a matched comparison reads off.
+LADDER = (
+    point(1, 0.8, 0.001),
+    point(2, 0.4, 0.002),
+    point(5, 0.1, 0.005),
+    point(10, 0.0, 0.010),
+)
+
+
+class TestTheLadder:
+    def test_it_is_every_divisor_of_the_substeps_the_data_used(self) -> None:
+        assert substep_ladder(10) == (1, 2, 5, 10)
+        assert substep_ladder(8) == (1, 2, 4, 8)
+
+    def test_a_prime_count_gives_the_two_rungs_it_has(self) -> None:
+        assert substep_ladder(7) == (1, 7)
+
+    def test_one_substep_is_a_ladder_of_one_rung(self) -> None:
+        assert substep_ladder(1) == (1,)
+
+    def test_a_count_below_one_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="must be positive"):
+            substep_ladder(0)
+
+
+class TestMatchedAccuracy:
+    def test_the_cheapest_rung_that_is_accurate_enough_is_the_one_compared_against(
+        self,
+    ) -> None:
+        """Not the setting the data was generated with.
+
+        That is exactly the comparison the phase exists to replace.
+        """
+        matched = matched_speedup(point(0, 0.3, 0.004, kind="surrogate"), LADDER)
+
+        assert matched.matched_substeps == 5
+        assert matched.matched_error == 0.1
+        assert matched.speedup == pytest.approx(1.25)
+
+    def test_a_surrogate_slower_than_its_matched_solver_reads_below_one(self) -> None:
+        matched = matched_speedup(point(0, 0.3, 0.020, kind="surrogate"), LADDER)
+
+        assert matched.speedup < 1.0
+
+    def test_an_inaccurate_surrogate_is_bracketed_by_the_coarse_end_of_the_ladder(
+        self,
+    ) -> None:
+        matched = matched_speedup(point(0, 0.5, 0.004, kind="surrogate"), LADDER)
+
+        assert matched.matched_substeps == 2
+        assert matched.bracketed
+
+    def test_a_surrogate_worse_than_the_coarsest_rung_is_not_bracketed(self) -> None:
+        """The one case the number is an upper bound rather than a measurement.
+
+        The solver could be run coarser than anything measured and still match, so the
+        cost being compared against is higher than the true matched cost.
+        """
+        matched = matched_speedup(point(0, 0.9, 0.004, kind="surrogate"), LADDER)
+
+        assert matched.matched_substeps == 1
+        assert not matched.bracketed
+
+    def test_a_surrogate_more_accurate_than_every_coarsening_matches_the_top_rung(
+        self,
+    ) -> None:
+        matched = matched_speedup(point(0, 0.05, 0.004, kind="surrogate"), LADDER)
+
+        assert matched.matched_substeps == 10
+        assert matched.bracketed
+
+    def test_a_ladder_that_never_reaches_the_accuracy_is_refused(self) -> None:
+        """Cannot happen with a real ladder, whose top rung produced ground truth.
+
+        Worth refusing rather than guessing at if a ladder is assembled by hand.
+        """
+        with pytest.raises(ValidationError, match="no rung"):
+            matched_speedup(point(0, 0.05, 0.004, kind="surrogate"), (point(1, 0.8, 0.001),))
+
+    def test_an_empty_ladder_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="needs a solver ladder"):
+            matched_speedup(point(0, 0.3, 0.004, kind="surrogate"), ())
+
+
+def matched(solver: float, surrogate: float) -> MatchedSpeedup:
+    """A comparison carrying only the two costs the accounting reads."""
+    return MatchedSpeedup(
+        predictor="surrogate",
+        error=0.3,
+        seconds_per_step=surrogate,
+        matched_substeps=5,
+        matched_error=0.1,
+        matched_seconds_per_step=solver,
+        speedup=solver / surrogate,
+        bracketed=True,
+    )
+
+
+class TestCostAccounting:
+    def test_the_break_even_count_repays_both_one_off_costs(self) -> None:
+        cost = cost_accounting(
+            matched(0.010, 0.005),
+            training_seconds=100.0,
+            generation_seconds=50.0,
+            steps_per_rollout=100,
+        )
+
+        assert cost.saving_per_rollout == pytest.approx(0.5)
+        assert cost.break_even_rollouts == 300.0
+
+    def test_it_rounds_up_because_a_part_rollout_repays_nothing(self) -> None:
+        cost = cost_accounting(
+            matched(0.010, 0.005),
+            training_seconds=100.25,
+            generation_seconds=0.0,
+            steps_per_rollout=100,
+        )
+
+        assert cost.break_even_rollouts == 201.0
+
+    def test_a_surrogate_slower_than_the_solver_never_pays(self) -> None:
+        cost = cost_accounting(
+            matched(0.005, 0.010),
+            training_seconds=100.0,
+            generation_seconds=0.0,
+            steps_per_rollout=100,
+        )
+
+        assert cost.saving_per_rollout < 0.0
+        assert cost.break_even_rollouts == NEVER_PAYS
+
+    def test_a_surrogate_exactly_as_fast_never_pays_either(self) -> None:
+        """Zero saving repaid into any one off cost is not a large number, it is no number."""
+        cost = cost_accounting(
+            matched(0.005, 0.005),
+            training_seconds=100.0,
+            generation_seconds=0.0,
+            steps_per_rollout=100,
+        )
+
+        assert cost.break_even_rollouts == NEVER_PAYS
+
+    def test_a_free_surrogate_breaks_even_on_its_first_rollout(self) -> None:
+        cost = cost_accounting(
+            matched(0.010, 0.005),
+            training_seconds=0.0,
+            generation_seconds=0.0,
+            steps_per_rollout=100,
+        )
+
+        assert cost.break_even_rollouts == 0.0
+
+    @pytest.mark.parametrize(
+        ("settings", "message"),
+        [
+            ({"training_seconds": -1.0}, "cannot be negative"),
+            ({"generation_seconds": -1.0}, "cannot be negative"),
+            ({"steps_per_rollout": 0}, "at least one step"),
+        ],
+    )
+    def test_a_cost_that_makes_no_sense_is_refused(
+        self, settings: dict[str, float], message: str
+    ) -> None:
+        arguments: dict[str, float] = {
+            "training_seconds": 1.0,
+            "generation_seconds": 1.0,
+            "steps_per_rollout": 10,
+        }
+
+        with pytest.raises(ValidationError, match=message):
+            cost_accounting(matched(0.010, 0.005), **{**arguments, **settings})  # type: ignore[arg-type]
