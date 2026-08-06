@@ -46,7 +46,12 @@ class EpochRecord(BaseModel):
         improved: Whether this epoch became the best so far.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # A run that diverged records a loss or a validation error that is not a finite
+    # number, and that is the truth about it rather than a value to clean up. Pydantic
+    # writes such a number as `null` by default, which then fails to read back as a
+    # float, so a diverged run would write a record nobody could open. `constants` writes
+    # `NaN` and `Infinity`, which the reader's `json.loads` accepts.
+    model_config = ConfigDict(frozen=True, extra="forbid", ser_json_inf_nan="constants")
 
     epoch: int = Field(ge=0)
     curriculum_steps: int = Field(ge=1)
@@ -77,7 +82,9 @@ class TrainingHistory(BaseModel):
         seconds: Wall clock for the whole run.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # `constants` for the same reason `EpochRecord` uses it: a number that is not finite
+    # is a measurement, and the default serialisation loses it.
+    model_config = ConfigDict(frozen=True, extra="forbid", ser_json_inf_nan="constants")
 
     model: str = Field(min_length=1)
     n_parameters: int = Field(ge=0)

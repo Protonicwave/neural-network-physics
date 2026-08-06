@@ -51,7 +51,10 @@ trajectories but not the spread across them.
 class Record(BaseModel):
     """Base for every result record: immutable and intolerant of unknown keys."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # `constants` rather than the default, so that a metric scalar which is not a finite
+    # number survives the round trip instead of being written as `null` and refusing to
+    # read back. A predictor that diverged is the ordinary case for that, not a rare one.
+    model_config = ConfigDict(frozen=True, extra="forbid", ser_json_inf_nan="constants")
 
 
 class SuiteSettings(Record):

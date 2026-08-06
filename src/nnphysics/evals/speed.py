@@ -89,7 +89,10 @@ _MINIMUM_STATES = 2
 class Record(BaseModel):
     """Base for every speed record: immutable and intolerant of unknown keys."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # `constants` rather than the default, so that a timing which is not a finite
+    # number survives the round trip instead of being written as `null` and refusing to
+    # read back. A predictor that diverged is the ordinary case for that, not a rare one.
+    model_config = ConfigDict(frozen=True, extra="forbid", ser_json_inf_nan="constants")
 
 
 class SpeedPoint(Record):
