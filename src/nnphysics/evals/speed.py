@@ -196,6 +196,12 @@ class SpeedReport(Record):
         unstable: Points whose timing spread was too large for the median to be quoted.
             Named rather than dropped, because a benchmark that quietly discarded its
             noisy measurements would report a precision it did not have.
+        unusable_substeps: Solver settings that could not take a single step, so they have
+            no accuracy to report. A step several times past what a solver's stability
+            allows is not a worse setting, it is one that does not run, and the ladder
+            simply stops there.
+        unmeasurable: Predictors that could not take a single step either, named for the
+            same reason.
     """
 
     schema_version: int = SPEED_SCHEMA_VERSION
@@ -213,6 +219,8 @@ class SpeedReport(Record):
     matched: tuple[MatchedSpeedup, ...] = ()
     costs: tuple[CostAccounting, ...] = ()
     unstable: tuple[str, ...] = ()
+    unusable_substeps: tuple[int, ...] = ()
+    unmeasurable: tuple[str, ...] = ()
 
 
 def substep_ladder(substeps: int) -> tuple[int, ...]:
@@ -252,7 +260,7 @@ def measure_point(  # noqa: PLR0913
     warmup: int = DEFAULT_WARMUP,
     steps_per_trial: int = DEFAULT_STEPS_PER_TRIAL,
     divergence_factor: float,
-) -> SpeedPoint:
+) -> SpeedPoint | None:
     """Measure one predictor's accuracy and its cost.
 
     Accuracy is averaged over every case and cost is timed on the first of them. Timing
@@ -275,7 +283,11 @@ def measure_point(  # noqa: PLR0913
         divergence_factor: Passed to every rollout.
 
     Returns:
-        The point.
+        The point, or `None` if the predictor could not take a single step from one of the
+        initial conditions. A rollout with no steps in it has no error curve, and a
+        solver run far past what its stability allows is exactly that: the setting is not
+        a slower or worse setting, it is one that does not run. The caller reports which
+        ones those were rather than putting a number against them.
 
     Raises:
         ValidationError: If there are no cases, or the counts do not match.
@@ -294,13 +306,7 @@ def measure_point(  # noqa: PLR0913
         result = roll_out(predictor, case.initial, horizon, divergence_factor=divergence_factor)
         completed = completed and result.completed
         if result.steps_completed < 1:
-            # A rollout with no steps in it has no error curve, and averaging over the
-            # ones that did run would report an accuracy for a predictor that produced
-            # nothing. There is no honest number here, so there is no point.
-            raise ValidationError(
-                f"predictor {predictor.name!r} took no step from {case.trajectory_id}: "
-                f"{result.stop_reason.value}{f', {result.detail}' if result.detail else ''}"
-            )
+            return None
         _, curve = relative_error(
             result.trajectory, _prefix(case.reference, len(result.trajectory))
         )
@@ -330,7 +336,7 @@ def solver_ladder(  # noqa: PLR0913
     warmup: int = DEFAULT_WARMUP,
     steps_per_trial: int = DEFAULT_STEPS_PER_TRIAL,
     divergence_factor: float,
-) -> tuple[SpeedPoint, ...]:
+) -> tuple[tuple[SpeedPoint, ...], tuple[int, ...]]:
     """Measure the reference solver at every substep count on the ladder.
 
     Args:
@@ -345,17 +351,25 @@ def solver_ladder(  # noqa: PLR0913
         divergence_factor: Passed to every rollout.
 
     Returns:
-        One point per rung, in the order given.
+        One point per rung that ran, in the order given, and the substep counts of the
+        rungs that could not take a single step. A spectral solver run at a step several
+        times its stability limit is one of those, and it is not a slower or a worse
+        setting: it is a setting that does not run, and putting an accuracy against it
+        would be inventing one.
 
     Raises:
-        ValidationError: If the ladder is empty or names a count below one.
+        ValidationError: If the ladder is empty, names a count below one, or no rung of
+            it ran at all.
     """
     if not ladder:
         raise ValidationError("a solver ladder needs at least one substep count")
     if any(substeps < 1 for substeps in ladder):
         raise ValidationError(f"every substep count must be positive, got {list(ladder)}")
-    return tuple(
-        measure_point(
+
+    measured: list[SpeedPoint] = []
+    unusable: list[int] = []
+    for substeps in ladder:
+        point = measure_point(
             [substepped_reference(system, case, substeps) for case in cases],
             cases,
             steps=steps,
@@ -368,8 +382,16 @@ def solver_ladder(  # noqa: PLR0913
             steps_per_trial=steps_per_trial,
             divergence_factor=divergence_factor,
         )
-        for substeps in ladder
-    )
+        if point is None:
+            unusable.append(substeps)
+        else:
+            measured.append(point)
+    if not measured:
+        raise ValidationError(
+            f"the reference solver took no step at any substep count in {list(ladder)}, "
+            f"so there is nothing to compare a surrogate against"
+        )
+    return tuple(measured), tuple(unusable)
 
 
 def matched_speedup(point: SpeedPoint, ladder: Sequence[SpeedPoint]) -> MatchedSpeedup:
@@ -507,7 +529,7 @@ def build_speed_report(  # noqa: PLR0913
         raise ValidationError(f"cases mix splits {sorted(split.value for split in splits)}")
 
     steps = min(config.rollout_steps, *(case.steps for case in cases))
-    ladder = solver_ladder(
+    ladder, unusable = solver_ladder(
         system,
         cases,
         steps=steps,
@@ -520,33 +542,38 @@ def build_speed_report(  # noqa: PLR0913
     )
 
     measured: list[SpeedPoint] = []
+    unmeasurable: list[str] = []
     for text in predictors:
         spec = parse_spec(text)
-        measured.append(
-            measure_point(
-                [
-                    build_case_predictor(
-                        system,
-                        case,
-                        spec,
-                        substeps=dataset_substeps,
-                        seed=seed,
-                        factories=factories,
-                    )
-                    for case in cases
-                ],
-                cases,
-                steps=steps,
-                label=spec.text,
-                kind=_SURROGATE,
-                substeps=0,
-                threads=threads,
-                trials=trials,
-                warmup=warmup,
-                steps_per_trial=steps_per_trial,
-                divergence_factor=config.divergence_factor,
-            )
+        point = measure_point(
+            [
+                build_case_predictor(
+                    system,
+                    case,
+                    spec,
+                    substeps=dataset_substeps,
+                    seed=seed,
+                    factories=factories,
+                )
+                for case in cases
+            ],
+            cases,
+            steps=steps,
+            label=spec.text,
+            kind=_SURROGATE,
+            substeps=0,
+            threads=threads,
+            trials=trials,
+            warmup=warmup,
+            steps_per_trial=steps_per_trial,
+            divergence_factor=config.divergence_factor,
         )
+        # A predictor that cannot take one step has no accuracy and no speed. Naming it
+        # is the honest report; a number against it would be an invention.
+        if point is None:
+            unmeasurable.append(spec.text)
+        else:
+            measured.append(point)
 
     matched = tuple(matched_speedup(point, ladder) for point in measured)
     generation = _generation_seconds(ladder, dataset_substeps, trajectories, states_per_trajectory)
@@ -574,6 +601,8 @@ def build_speed_report(  # noqa: PLR0913
         matched=matched,
         costs=costs,
         unstable=tuple(point.label for point in (*ladder, *measured) if not point.stable),
+        unusable_substeps=unusable,
+        unmeasurable=tuple(unmeasurable),
     )
 
 

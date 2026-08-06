@@ -1,16 +1,45 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
-from nnphysics.core.errors import ValidationError
+from nnphysics.core.errors import NumericalError, ValidationError
+from nnphysics.core.types import Regime, State, Trajectory
+from nnphysics.data.manifest import Split
+from nnphysics.evals.runner import EvaluationCase
 from nnphysics.evals.speed import (
     NEVER_PAYS,
     MatchedSpeedup,
     SpeedPoint,
     cost_accounting,
     matched_speedup,
+    measure_point,
     substep_ladder,
 )
+
+
+class Refusing:
+    """A solver run so far past its stability limit that it cannot take one step."""
+
+    dt = 0.5
+
+    @property
+    def name(self) -> str:
+        return "refusing"
+
+    def step(self, current: State) -> State:
+        raise NumericalError(f"unstable at t={current.time}")
+
+
+def case() -> EvaluationCase:
+    """One initial condition with four steps of ground truth after it."""
+    times = np.arange(5, dtype=np.float64) * Refusing.dt
+    return EvaluationCase(
+        trajectory_id="hot/00000",
+        regime=Regime(name="hot", parameters={}),
+        split=Split.TEST,
+        reference=Trajectory(fields={"q": np.ones((5, 3))}, times=times),
+    )
 
 
 def point(substeps: int, error: float, seconds: float, *, kind: str = "solver") -> SpeedPoint:
@@ -53,6 +82,30 @@ class TestTheLadder:
     def test_a_count_below_one_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="must be positive"):
             substep_ladder(0)
+
+
+class TestARungThatCannotRun:
+    def test_a_setting_that_takes_no_step_is_reported_as_nothing_rather_than_a_number(
+        self,
+    ) -> None:
+        """A solver several times past its stability limit is not a worse setting.
+
+        It is one that does not run, and putting an accuracy against it would invent one.
+        """
+        measured = measure_point(
+            [Refusing()],
+            [case()],
+            steps=4,
+            label="reference:substeps=1",
+            kind="solver",
+            substeps=1,
+            threads=1,
+            trials=1,
+            warmup=0,
+            divergence_factor=1.0e3,
+        )
+
+        assert measured is None
 
 
 class TestMatchedAccuracy:

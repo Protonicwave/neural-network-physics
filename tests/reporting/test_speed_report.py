@@ -207,3 +207,32 @@ class TestTheFigures:
 class TestRenderingStaysDeterministic:
     def test_the_same_record_renders_the_same_report_twice(self, benchmarked: RunRecord) -> None:
         assert to_markdown(build_document(benchmarked)) == to_markdown(build_document(benchmarked))
+
+
+class TestWhatCouldNotBeMeasured:
+    def test_a_solver_setting_that_could_not_run_is_named(
+        self, record: RunRecord, make_speed_report: Callable[[], SpeedReport]
+    ) -> None:
+        """The ladder stops rather than being extended with an invented number.
+
+        And the report says where it stopped.
+        """
+        report = make_speed_report()
+        attached = record.model_copy(
+            update={"benchmark": report.model_copy(update={"unusable_substeps": (1,)})}
+        )
+
+        rendered = render_markdown(attached)
+
+        assert "Missing from the table: 1 substeps" in rendered
+        assert "could not take a single step" in rendered
+
+    def test_a_predictor_that_could_not_run_is_named_the_same_way(
+        self, record: RunRecord, make_speed_report: Callable[[], SpeedReport]
+    ) -> None:
+        report = make_speed_report()
+        attached = record.model_copy(
+            update={"benchmark": report.model_copy(update={"unmeasurable": ("operator",)})}
+        )
+
+        assert "Missing from the table: operator" in render_markdown(attached)

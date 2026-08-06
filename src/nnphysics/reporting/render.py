@@ -635,6 +635,18 @@ def _speed_section(record: RunRecord, plots: Sequence[PlotRecord]) -> list[Block
             "produced ground truth has an error of zero by construction.",
         ),
     ]
+    if report.unusable_substeps or report.unmeasurable:
+        named = [f"{count} substeps" for count in report.unusable_substeps]
+        named += list(report.unmeasurable)
+        blocks.append(
+            Paragraph(
+                f"Missing from the table: {_join(named)}. Each of those could not take a "
+                f"single step from one of the initial conditions, so there is no accuracy "
+                f"to put against it. A solver run several times past what its stability "
+                f"allows is not a worse setting, it is one that does not run, and the "
+                f"ladder stops there rather than being extended with an invented number."
+            )
+        )
     if report.unstable:
         blocks.append(
             Paragraph(
