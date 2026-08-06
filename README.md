@@ -180,7 +180,7 @@ One loop, system agnostic, driven by configuration. Deterministic seeding, gradi
 clipping, a cosine schedule with warmup, early stopping on a validation rollout rather
 than on the training loss, and best and last checkpoints carrying optimiser state.
 
-Two decisions in it earned their place by being wrong first.
+Three decisions in it earned their place by being wrong first.
 
 **Shuffling is a function of the run seed and the epoch number, not of a generator carried
 forward.** Epoch seventeen sees the same order whether it was reached in one run or three,
@@ -197,10 +197,32 @@ times anything else in the batch. Past one standard deviation the loss is linear
 metric stays a plain squared error, because nothing is optimised against it and a number
 that stopped growing once a rollout went wrong is the wrong number to select a model on.
 
+**Early stopping waits for the last curriculum stage, and each stage gets its own
+patience.** Stopping early claims that more training of this kind will not help, and a
+scheduled longer window is not more of the same kind. The fluid operator is where this was
+found and it cost a whole stage: patience of ten against a stage change thirteen epochs
+later ended the run at epoch 27, so the eight step stage never ran. With the rule in place
+the same settings reached it and every one of its epochs beat the best of the four step
+stage. The N-body runs were exposed to the same defect and escaped it only because their
+numbers happened to keep improving.
+
 The rollout curriculum trains on one step, then four, then eight, with gradients truncated
 by the window. It is what makes a surrogate stable over a long horizon, and its absence is
-the usual reason surrogates diverge. It earned its place here: the validation rollout
-improved at every lengthening, 0.1388 on one step, 0.1015 on four, 0.0785 on eight.
+the usual reason surrogates diverge.
+
+What it does is not what the phase 07 numbers alone suggested, and the two systems disagree
+enough to be worth stating. On N-body the validation rollout improved at every lengthening,
+0.1388 on one step, 0.1015 on four, 0.0785 on eight. On the fluid operator the improvement
+comes at the lengthening and is then given back: the four step stage opened at 0.5762, the
+best number the run ever produced, and degraded monotonically to 4.625 over the next twelve
+epochs while its training loss fell the whole way. The eight step stage reset it to 0.66.
+The convolutional network on the same schedule did not do this, improving through both
+longer stages to 0.3103.
+
+So a longer window helps at the moment it is applied and does not keep helping, and how
+long that lasts is a property of the model rather than of the schedule. Selecting on the
+validation rollout is what makes the difference survivable: it picks the epoch the
+lengthening bought and ignores the twelve that followed.
 
 ### What the default N-body run produces
 
@@ -279,9 +301,11 @@ grid, and their parameter counts are matched deliberately: 149,001 against 148,8
 is eight parts in ten thousand. Without that the comparison would be about capacity.
 
 Both splits, 63 steps from four initial conditions. The operator took 1,941 s to train on
-eight cores; the convolutional network took about 5,800 s, roughly three times as much for
-the same number of parameters, because a stencil costs nine multiplies per point where a
-one by one convolution costs one.
+eight cores. The convolutional network took about 5,800 s, roughly three times as much for
+the same number of parameters, because a stencil costs nine multiplies per grid point where
+a one by one convolution costs one. That figure is the sum of its epochs with two excluded:
+the run was interrupted and resumed, and the machine was suspended during those two, so
+their wall clock says nothing about the model.
 
 | Predictor | one step error | horizon at 10% error | error at 63 steps | worst invariant drift |
 |---|---|---|---|---|
@@ -311,19 +335,22 @@ on both horizon and final error.** Twice as accurate over one step, and a final 
 rollout rather than merely failing to get worse.
 
 **Its enstrophy is close to right and its energy is not.** The suite reports an enstrophy
-excursion of 28.8 against the solver's own 29.0, so the model reproduces the viscous decay
-of enstrophy almost exactly. Energy is a different story: an excursion of 0.513 against the
-solver's 0.234, of which 0.566 is excess rather than shortfall. The model adds energy the
-physics did not supply, roughly twice the excursion the true dynamics have. That is the
-unphysical growth this phase was told to report rather than hide, and it is the reason the
-invariant violation is 1.1e8 for a model whose error curve looks healthy.
+excursion of 28.8 for the convolution against the solver's own 29.0, so the model
+reproduces the viscous decay of enstrophy almost exactly. Energy does not fare as well: an
+excursion of 0.513 against the solver's 0.234, roughly twice as far as the true dynamics
+move. The metric also separates the direction, and it is growth rather than over
+dissipation: the predicted energy stands as much as 0.566 above the true value at some
+point in the rollout and only 0.006 below it. The model adds energy the physics did not
+supply. That is the unphysical growth this phase was told to report rather than hide, and
+it is why the invariant violation reads 1.1e8 for a model whose error curve looks healthy.
 
-**Neither model is fast enough to matter yet.** The operator runs at 0.0091 s per stored
-interval against the solver's 0.0115, and the convolution at 0.0072 against 0.0094: a
-speedup of 1.3 either way, on a solver taking ten substeps per stored interval. A surrogate
-that is twenty per cent faster and less accurate has not earned its place, and the honest
-reading of the speedup column is that this grid is too small for the fixed costs to
-amortise.
+**Neither model is fast enough to matter yet.** Measured against the reference solver in
+the same run, the operator takes 0.0091 s per stored interval against 0.0115 and the
+convolution 0.0072 against 0.0094, so both are about a quarter to a third faster. That is
+against a solver taking ten substeps per stored interval, which is where a surrogate's
+speedup is supposed to come from. A model that saves thirty per cent and is less accurate
+has not earned its place, and the honest reading is that a 64 by 64 grid is too small for
+the fixed costs of a network to amortise against a spectral step.
 
 ### Resolution generalisation, and what its number means here
 
