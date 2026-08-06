@@ -3,8 +3,18 @@
 Neural surrogates for two physical systems, gravitational N-body and 2D incompressible
 fluid flow, with an evaluation harness that measures where a surrogate can be trusted:
 error growth over long rollouts, drift in conserved quantities, behaviour outside the
-training regime, respect for symmetries, and speedup at matched accuracy. The harness is
-system agnostic. See `docs/plan/` for the implementation plan.
+training regime, respect for symmetries, calibration of the surrogate's own uncertainty,
+and speedup at matched accuracy. The harness is system agnostic. See `docs/plan/` for the
+implementation plan.
+
+The headline result, since the point of the exercise is to answer it rather than to avoid
+it: **on this machine neither surrogate is faster than the solver at matched accuracy.**
+The N-body graph network runs at about a twentieth of the speed of the cheapest solver
+setting that matches it. The fluid neural operator is the one close case, and its speedup
+of 1.23 has a range of 0.81 to 1.63 over eight repeats, which does not establish a speedup
+at all. What the ensembles do buy is a usable warning: on the fluid, the spread crosses the
+level at which a prediction stops being worth using 0.4 of simulated time before the error
+does. On N-body it crosses 0.09 too late.
 
 ## Getting started
 
@@ -69,8 +79,8 @@ and on the held out regime, and report the difference between them as an explici
 
 | Config | Predictors | Steps | Initial conditions | Evaluation |
 |---|---|---|---|---|
-| `configs/nbody.yaml` | 6 | 255 | 4 per split | 8 s |
-| `configs/fluid.yaml` | 6 | 63 | 4 per split | 32 s |
+| `configs/nbody.yaml` | 8 | 255 | 4 per split | 11 s |
+| `configs/fluid.yaml` | 8 | 63 | 4 per split | 43 s |
 
 The harness is system agnostic and a test enforces it: nothing under `src/nnphysics/evals`
 may import a system or a model. Metrics read the invariants and symmetries a system
@@ -78,8 +88,8 @@ declares and know no physics of their own.
 
 ### The predictors
 
-The suite ships one correct predictor and five that are wrong on purpose. The broken ones
-are permanent fixtures rather than test scaffolding, because a metric only means something
+The suite ships one correct predictor and seven that are wrong on purpose. They are
+permanent fixtures rather than test scaffolding, because a metric only means something
 next to the numbers they produce.
 
 | Predictor | What it does |
@@ -90,13 +100,20 @@ next to the numbers they produce.
 | `noise` | The solver with Gaussian noise added each step |
 | `energy_injection` | The solver with every declared rate amplified by a fixed factor |
 | `symmetry_break` | The solver with a declared symmetry applied after each step |
+| `calibrated` | Noise, stating the deviation it has actually accumulated |
+| `overconfident` | The same noise, stating a hundredth of it |
+
+The last two differ only in what they claim. At equal confidence they produce bit
+identical states, so every metric that reads states alone rates them the same and only
+the calibration metric separates them. That is what makes it a measurement of the claim
+rather than of the noise, and it is asserted in `tests/evals/test_sentinels.py`.
 
 ### The metrics
 
 `one_step_error`, `rollout_error`, `invariant_drift`, `symmetry_violation`,
-`distribution_drift` and `resolution_generalisation`. Every one of them has a sentinel test
-asserting both what it catches and what it does not, because a metric that flags everything
-measures nothing. Three results worth stating, all asserted in
+`distribution_drift`, `resolution_generalisation` and `calibration`. Every one of them has
+a sentinel test asserting both what it catches and what it does not, because a metric that
+flags everything measures nothing. Three results worth stating, all asserted in
 `tests/evals/test_sentinels.py`:
 
 - The energy injecting predictor is a thousand times more accurate than persistence over
@@ -109,8 +126,12 @@ measures nothing. Three results worth stating, all asserted in
   equivariant under rotation. Only the symmetries it does not commute with reveal it, which
   is why every declared symmetry is tested and the worst is reported.
 
-`resolution_generalisation` is the one metric that does not apply to every system, and it
-says so rather than scoring. It refines the initial condition to a resolution the system
+Two metrics do not apply to everything they are handed, and both say so rather than
+scoring. `calibration` is not applicable to a predictor that states no uncertainty, which
+is six of the eight above: it reports zero steps rather than a perfect score, because
+flattering six predictors that never made a claim would leave the metric meaningless.
+
+`resolution_generalisation` is the other, and it does not apply to every system. It refines the initial condition to a resolution the system
 declares, rolls the predictor forward there, coarsens the result back, and reports both how
 far the predictor drifted from its own answer and how much accuracy that cost. A system
 whose state is not a discretisation of a continuous field declares no refinement and reports
@@ -344,13 +365,13 @@ point in the rollout and only 0.006 below it. The model adds energy the physics 
 supply. That is the unphysical growth this phase was told to report rather than hide, and
 it is why the invariant violation reads 1.1e8 for a model whose error curve looks healthy.
 
-**Neither model is fast enough to matter yet.** Measured against the reference solver in
-the same run, the operator takes 0.0091 s per stored interval against 0.0115 and the
-convolution 0.0072 against 0.0094, so both are about a quarter to a third faster. That is
-against a solver taking ten substeps per stored interval, which is where a surrogate's
-speedup is supposed to come from. A model that saves thirty per cent and is less accurate
-has not earned its place, and the honest reading is that a 64 by 64 grid is too small for
-the fixed costs of a network to amortise against a spectral step.
+**Neither model is fast enough to matter.** The rollout driver's own timings put the
+operator at 0.0091 s per stored interval against the solver's 0.0115 and the convolution at
+0.0072 against 0.0094, which reads as a saving of a quarter to a third. That reading is
+wrong, and the section on speed below says why: it is a comparison against the solver at
+the settings that generated the data, and those settings are twice what this horizon needs.
+Against the solver run as cheaply as it can be while staying accurate, no surrogate here is
+established as faster than parity.
 
 ### Resolution generalisation, and what its number means here
 
@@ -397,6 +418,217 @@ The honest summary of the phase is that the spectral structure bought exactly on
 and it is not accuracy. Without the convolutional control at matched parameter count there
 would have been no way to know that, and without the resolution metric there would have
 been no way to see what was bought instead.
+
+## Speed at matched accuracy
+
+```sh
+uv run nnp benchmark --config configs/fluid.yaml --threads 1
+uv run nnp benchmark --config configs/nbody.yaml --threads 1 --ensemble --trials 15 --steps 255
+```
+
+A surrogate that is not faster than the solver it replaces has no purpose, and this is the
+question the whole repository exists to answer. It is also the easiest one to answer
+dishonestly, because timing a network against the solver at the settings the training data
+was generated with flatters the network: those settings were chosen to make ground truth,
+not to be fast.
+
+So the solver's own curve is measured first. It has one knob, the substeps it folds into a
+stored interval, and `benchmark` walks every count that divides the one the dataset used,
+measuring accuracy and cost on the same states. A surrogate is one more point on the same
+axes, and the speedup is read off the crossing. Timings discard warmups, repeat trials, and
+report the median with its interquartile range rather than the best time, because a best of
+fifteen measures how quiet the machine briefly was.
+
+Accuracy here is the worst normalised error over the horizon rather than the error at the
+end, since a rollout that went wrong and came back is not a rollout that stayed right.
+
+### What the two systems produce
+
+Both tables are one thread, fifteen trials after five warmups, on the eight core machine.
+One thread because the solvers are single threaded whatever the setting is, the fluid
+through `numpy.fft` and the N-body through `numpy.einsum`, so anything higher gives the
+network more of the machine than the thing it is being compared against.
+
+The right hand column is the spread of the median across eight repeats of the whole
+benchmark, which is the larger and more honest number: it is what the claim has to survive,
+and on a laptop with a browser open it is large.
+
+N-body, 255 steps from four initial conditions:
+
+| Predictor | worst error | median ms per step | spread over 8 repeats |
+|---|---|---|---|
+| solver, 1 substep | 1.597 | 0.071 | 14% |
+| solver, 2 substeps | 1.259 | 0.142 | 140% |
+| solver, 5 substeps | 1.212 | 0.685 | 40% |
+| solver, 10 substeps | 0 | 1.420 | 38% |
+| `graph` | 1.523 | 2.877 | 60% |
+| `ensemble` of four | **1.243** | 10.69 | 63% |
+
+Fluid, 63 steps from four initial conditions:
+
+| Predictor | worst error | median ms per step | spread over 8 repeats |
+|---|---|---|---|
+| solver, 1 and 2 substeps | cannot run | | |
+| solver, 5 substeps | 7.2e-05 | 7.457 | 40% |
+| solver, 10 substeps | 0 | 17.52 | 46% |
+| `operator` | 936.6 | **6.162** | 50% |
+| `ensemble` of four | 978.6 | 23.33 | 46% |
+
+**No surrogate here is faster than the solver at matched accuracy, and three of the four
+are not close.** The graph network runs at 0.056 of the speed of the cheapest solver
+setting that matches its accuracy, over a range of 0.043 to 0.107 across the repeats. Its
+ensemble is at 0.062. The fluid ensemble is at 0.315. None of them pays for itself in any
+repeat, and none of them comes near enough that the machine's noise could be the reason.
+
+**The fluid operator is the one case that is genuinely undecided, and the honest answer is
+that no speedup was established.** Its median is 1.23 times the solver at five substeps,
+and the range across eight repeats is 0.81 to 1.63. It was the faster of the two in six
+repeats and the slower in two. A number whose spread straddles one is not a measurement of
+a speedup, and quoting the 1.23 without the range would be the exact error this section
+exists to avoid.
+
+**The solver's own ladder is where the interesting result is.** On the fluid, halving the
+substeps from ten to five costs an accuracy of 7.2e-05 over 63 steps, which is nothing, and
+saves 58 per cent of the wall clock. The dataset's ten substeps are twice what this horizon
+needs. Any surrogate is therefore competing against a solver that can be run at half the
+advertised price before it has started, and this is the comparison a benchmark against
+default settings silently skips.
+
+Below five substeps the fluid solver does not run at all: one and two are several times
+past the stability limit and cannot take a single step. They are left out of the ladder and
+named, because a setting that does not run is not a slower or a worse setting, and putting
+an accuracy against it would be inventing one.
+
+On N-body the ladder collapses in the other direction. Over 255 steps of a chaotic cluster
+the solver at five substeps has already reached an error of 1.21 against the ground truth
+it generated at ten. There is no cheap accurate setting to compete with, and there is no
+setting inaccurate enough to match a surrogate either.
+
+### Cost accounting, and the break even count
+
+| System | Predictor | training | data | saving per rollout | break even |
+|---|---|---|---|---|---|
+| N-body | `graph` | 1,328 s | 57 s | -0.574 s | never |
+| N-body | `ensemble` | 5,297 s | 57 s | -2.17 s | never |
+| Fluid | `operator` | 2,010 s | 106 s | 0.150 s | 14,000 rollouts |
+| Fluid | `ensemble` | 7,644 s | 106 s | -0.958 s | never |
+
+The data cost is measured here rather than recalled. The wall clock generation actually
+took was spread over worker processes under an unknown load and says as much about that day
+as about the work; the intervals the dataset holds, times what the solver costs for one of
+them on this machine at this thread count, is the comparable number. It is also small: 57
+seconds against 1,328 spent training, so for these datasets the training dominates and the
+generation is a rounding error.
+
+The one break even figure in the table carries the caveat above. It comes from a repeat in
+which the operator was faster, and the same accounting over the repeats where it was faster
+at all gives 9,700 to 26,700 rollouts. Since the speedup itself is not established, neither
+is the break even count, and the honest summary is that the fluid operator would need tens
+of thousands of rollouts to repay its training even on the assumption that it saves
+anything.
+
+## Uncertainty
+
+```sh
+uv run nnp ensemble train --config configs/nbody.yaml
+uv run nnp ensemble run   --config configs/nbody.yaml
+```
+
+A deep ensemble: four models of the same configuration, differing only in initialisation
+and in the order they saw their data. `ensemble train` trains them one after another into
+their own run directories and `ensemble run` scores them together as one predictor.
+
+The member index shifts every seed except the dataset's, and a test asserts the dataset
+identifier does not move. Members that trained on different data would be measuring the
+data rather than the initialisation, and their disagreement would mean nothing. Member zero
+is the plain run, so a configuration already trained is not trained again.
+
+Two decisions fix what the spread means. Every member keeps its own trajectory rather than
+being reset to the mean each step, because averaging and feeding back gives a spread that
+measures one step of disagreement and never grows, which cannot answer the question the
+phase is asking. And the ensemble's prediction is the mean of the members, so the
+trajectory that is scored is the one the spread describes.
+
+The four N-body members reached validation errors of 0.0785, 0.0801, 0.0726 and 0.0669, and
+the four fluid members 0.576, 0.513, 0.569 and 0.548, so they did land in different minima.
+
+### What the ensemble buys, and what it does not
+
+| System | Predictor | one step error | error at the end | rollouts completed |
+|---|---|---|---|---|
+| N-body, test | `graph` | 0.053 | 2.08 | 4 of 4 |
+| N-body, test | `ensemble` | **0.044** | **1.30** | 4 of 4 |
+| N-body, held out | `graph` | 1.11 | 635 | 3 of 4 |
+| N-body, held out | `ensemble` | 1.33 | 659 | 0 of 4 |
+| Fluid, test | `operator` | 0.171 | 937 | 2 of 4 |
+| Fluid, test | `ensemble` | 0.167 | 979 | 2 of 4 |
+
+**Averaging four models helps where the models were working and does not rescue one that
+was not.** On the N-body test split the ensemble improves every accuracy number: a fifth
+off the one step error and a final error of 1.30 against the single network's 2.08. It is
+still above the 1.04 of persistence at the end of the rollout, so the point made in the
+phase 07 numbers stands, but the gap has closed from a factor of two to a fifth.
+
+On the held out regime and on the fluid it changes nothing worth having. Four models that
+all diverge produce a mean that also diverges, and on the N-body held out regime it
+diverges sooner than the single network did, 0 of 4 rollouts surviving against 3 of 4. That
+is the honest shape of the result: an ensemble is an average, and the average of four paths
+that have left the physical manifold is not on it either.
+
+### Calibration
+
+| System, split | Predictor | calibration error | coverage | spread against error | warning lead |
+|---|---|---|---|---|---|
+| N-body, test | `overconfident` | 0.498 | 0.003 | 0.965 | no warning |
+| N-body, test | `calibrated` | 0.296 | 0.276 | 0.971 | -0.905 |
+| N-body, test | `ensemble` | **0.135** | **0.494** | 0.954 | -0.088 |
+| Fluid, test | `overconfident` | 0.492 | 0.011 | 0.960 | no warning |
+| Fluid, test | `calibrated` | 0.282 | 0.614 | 0.964 | no warning |
+| Fluid, test | `ensemble` | **0.090** | **0.721** | 0.998 | **+0.4** |
+
+Coverage is the fraction of the truth that fell inside one stated standard deviation, and a
+correctly sized claim delivers 0.683. Below it is overconfident, which is the direction
+that matters.
+
+**The ensemble is the best calibrated predictor in the suite, and it beats the fixture that
+is telling the truth about its own noise.** That is not a paradox. The honest fixture states
+the deviation its noise accumulates to as a random walk, and neither system is a random
+walk: both amplify a perturbation faster than that, so a claim that is honest about the
+noise still understates the error. The ensemble's spread is not a claim about noise, it is
+four models disagreeing, and the disagreement grows the way the error does.
+
+**The spread and the error move together almost perfectly, and that is the weaker of the two
+results.** A correlation of 0.95 to 1.00 across every row is less impressive than it looks:
+both curves grow monotonically over a rollout, so a correlation this high mostly says that
+neither of them went down. The horizons are the stronger test.
+
+**Whether the surrogate warns in time depends on the system, and on N-body it does not.**
+The fluid ensemble's spread passes the trust threshold at a horizon of 1.0 and its error
+passes it at 1.4, so it warns 0.4 of simulated time before it stops being worth using, and
+that is the practically useful result the phase set out to find. The N-body ensemble warns
+0.088 too late: the error crosses at 0.055 and the spread only at 0.143. A surrogate that
+notices it has gone wrong after it has gone wrong cannot be used to decide when to fall
+back to the solver, and the two horizons are reported separately so that this is visible
+rather than hidden inside a single averaged lead.
+
+**Sharpness is reported beside all of it, because calibration alone can be bought.** The
+fluid ensemble's mean stated spread is 109 times the size of the true state, and on the
+held out regimes both ensembles read in the hundreds. A predictor that says the answer might
+be anywhere is never caught out and has said nothing, and those rows are that rather than a
+success.
+
+### The number that does not survive a change of thread count
+
+The N-body graph network's worst error over 255 steps is 2.143 on eight threads and 1.523
+on one. Same weights, same initial conditions, same code. Threading changes the order the
+sums inside the network are accumulated in, and a chaotic 32 body cluster amplifies that
+round off into a 40 per cent difference in the headline accuracy by the end of the rollout.
+
+The speed tables above are all one thread and are therefore consistent with each other, and
+the evaluation tables elsewhere in this file are all eight and consistent with each other,
+but the two must not be read across. It is worth stating plainly: for a chaotic system at
+this horizon, the third significant figure of a reported error is a property of the machine
+it was measured on.
 
 ## Reporting
 

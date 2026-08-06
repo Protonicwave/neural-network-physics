@@ -723,6 +723,11 @@ def _speed_section(record: RunRecord, plots: Sequence[PlotRecord]) -> list[Block
     return blocks
 
 
+def _plural(count: int, noun: str) -> str:
+    """A count and its noun, with the noun made plural only when it should be."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def _break_even(rollouts: float) -> str:
     """A break even count, or what it means when there is not one."""
     if rollouts == NEVER_PAYS:

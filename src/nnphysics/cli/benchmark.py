@@ -6,6 +6,13 @@ the solver and the network would be comparing thread counts. It is set here, at 
 before anything is built, and recorded in the report; the evaluation layer records the
 number and never reaches for it.
 
+What it actually constrains is the models, because they are the only multithreaded party.
+Both supported solvers are single threaded whatever this is set to: the fluid steps
+through `numpy.fft`, which is, and the N-body solver through `numpy.einsum`, which does
+not reach a threaded library for the contractions it does. So this knob does not level a
+playing field between the two, it fixes the one side that has a choice, and a comparison
+at one thread is the one where neither side is using more of the machine than the other.
+
 The report is written twice, beside the run record and into it. Beside it so a benchmark
 can be read without parsing a run, into it so the machine specification, the commit and
 the configuration travel with the numbers. Where a record already exists the benchmark is
@@ -85,7 +92,9 @@ def benchmark(  # noqa: PLR0913, PLR0917
         int | None,
         typer.Option(
             "--threads",
-            help="Threads the arithmetic may use. Defaults to every logical core.",
+            help="Threads a model may use. Defaults to every logical core. The solvers "
+            "are single threaded whatever this is, so one thread is the setting at "
+            "which neither side has more of the machine than the other.",
             show_default=False,
         ),
     ] = None,
@@ -163,7 +172,8 @@ def summarise_speed(report: SpeedReport) -> None:
     """
     typer.echo(
         f"System {report.system}, {report.split} split, {report.steps} steps from "
-        f"{report.n_initial_conditions} initial conditions, {report.threads} threads."
+        f"{report.n_initial_conditions} initial conditions, {report.threads} thread"
+        f"{'' if report.threads == 1 else 's'}."
     )
     for point in (*report.ladder, *report.surrogates):
         flag = "" if point.stable else f"  [unstable, above {STABILITY_LIMIT:.0%}]"
@@ -293,10 +303,13 @@ def _resolve(config: Path) -> RunConfig:
 
 
 def _fix_threads(threads: int | None) -> int:
-    """Pin how many threads the arithmetic may use, and return the number pinned.
+    """Pin how many threads a model may use, and return the number pinned.
 
     Set rather than read, because a timing is only comparable against another timing if
-    both were taken with the same number of cores doing the work.
+    both were taken with the same number of cores doing the work. This reaches the models
+    only; the solvers are single threaded NumPy either way, so a run at more than one
+    thread is measuring a network with more of the machine than the solver it is being
+    compared against.
     """
     chosen = threads if threads is not None else max(1, os.cpu_count() or 1)
     torch.set_num_threads(chosen)
