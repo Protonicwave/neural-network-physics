@@ -30,19 +30,33 @@ from nnphysics.models.baselines import (
     build_mlp,
 )
 from nnphysics.models.graph import GRAPH_NAME, NBodyGraphModel, build_graph
+from nnphysics.models.operator import (
+    CONVOLUTION_NAME,
+    OPERATOR_NAME,
+    ConvolutionalBaseline,
+    FourierNeuralOperator,
+    build_convolution,
+    build_operator,
+)
 
 MODELS.add(CONSTANT_NAME, build_constant)
 MODELS.add(MLP_NAME, build_mlp)
 MODELS.add(GRAPH_NAME, build_graph)
+MODELS.add(OPERATOR_NAME, build_operator)
+MODELS.add(CONVOLUTION_NAME, build_convolution)
 
 __all__ = [
     "CHECKPOINT_SCHEMA_VERSION",
     "CONSTANT_NAME",
+    "CONVOLUTION_NAME",
     "GRAPH_NAME",
     "MLP_NAME",
     "MODELS",
+    "OPERATOR_NAME",
     "Carry",
     "ConstantModel",
+    "ConvolutionalBaseline",
+    "FourierNeuralOperator",
     "ModelContext",
     "ModelFactory",
     "ModelHyperparameters",
@@ -50,9 +64,11 @@ __all__ = [
     "NBodyGraphModel",
     "SurrogateModel",
     "build_constant",
+    "build_convolution",
     "build_graph",
     "build_mlp",
     "build_model",
+    "build_operator",
     "load_model",
     "model_payload",
     "save_model",
