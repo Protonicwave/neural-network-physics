@@ -13,7 +13,12 @@ from nnphysics.training.checkpoint import (
     save_checkpoint,
 )
 from nnphysics.training.curriculum import Stage, stage_length, stages
-from nnphysics.training.history import EpochRecord, TrainingHistory
+from nnphysics.training.history import (
+    EpochRecord,
+    TrainingHistory,
+    read_history,
+    write_history,
+)
 from nnphysics.training.loop import SHUFFLE_SEED_STREAM, Progress, train_model
 from nnphysics.training.losses import (
     HUBER_DELTA,
@@ -39,6 +44,7 @@ __all__ = [
     "cosine_with_warmup",
     "learning_rate_factor",
     "load_checkpoint",
+    "read_history",
     "rollout_error",
     "rollout_loss",
     "rollout_residual",
@@ -46,4 +52,5 @@ __all__ = [
     "stage_length",
     "stages",
     "train_model",
+    "write_history",
 ]

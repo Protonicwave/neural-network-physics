@@ -25,8 +25,9 @@ import typer
 
 from nnphysics import __version__
 from nnphysics.cli.evals import summarise_suite
+from nnphysics.cli.predictors import CHECKPOINT_DIR, ModelFactory
 from nnphysics.core.config import RunConfig, load_run_config
-from nnphysics.core.errors import NNPhysicsError, ValidationError
+from nnphysics.core.errors import NNPhysicsError
 from nnphysics.core.seeding import make_deterministic
 from nnphysics.data.fields import constant_fields
 from nnphysics.data.layout import MANIFEST_NAME, NORMALISATION_NAME, dataset_dir
@@ -40,22 +41,18 @@ from nnphysics.data.normalisation import (
 from nnphysics.evals.result import write_result
 from nnphysics.evals.runner import load_cases, run_suite
 from nnphysics.evals.snapshots import Snapshot, SnapshotSet, capture_snapshots, write_snapshots
-from nnphysics.models import ModelContext, SurrogateModel, build_model, load_model
+from nnphysics.models import ModelContext, build_model, load_model
 from nnphysics.reporting.environment import describe_environment, git_commit
 from nnphysics.reporting.layout import RunPaths, run_paths
 from nnphysics.reporting.record import RunRecord, write_record
 from nnphysics.systems import build_system
-from nnphysics.training import CheckpointPaths, TrainingHistory, train_model
+from nnphysics.training import CheckpointPaths, TrainingHistory, train_model, write_history
 
 if TYPE_CHECKING:
-    from nnphysics.core.protocols import Predictor, System
-    from nnphysics.evals.predictors import PredictorContext, PredictorParameters
+    from nnphysics.core.protocols import System
     from nnphysics.evals.result import SuiteResult
 
 __all__ = ["train"]
-
-CHECKPOINT_DIR = "checkpoints"
-"""Where the best and last checkpoints of a run live, inside its run directory."""
 
 _EXIT_FAILURE = 1
 _EXIT_USAGE = 2
@@ -99,7 +96,7 @@ def train(
 ) -> None:
     """Train a surrogate on generated trajectories and score it."""
     resolved = _resolve(config)
-    make_deterministic(resolved.seed)
+    make_deterministic(resolved.run_seed)
     directory = dataset_dir(resolved)
     paths = run_paths(resolved)
     paths.ensure()
@@ -122,12 +119,13 @@ def train(
             resolved.training,
             directory,
             manifest,
-            seed=resolved.seed,
+            seed=resolved.run_seed,
             checkpoints=checkpoints,
             progress=typer.echo,
             resume=resume,
         )
         trained = time.perf_counter() - started
+        write_history(paths.history, history)
         typer.echo(
             f"Best epoch {history.best_epoch} with validation error "
             f"{history.best_validation_error:.4g}, trained in {history.seconds:.1f}s."
@@ -169,7 +167,7 @@ def _evaluate(  # noqa: PLR0913
     started = time.perf_counter()
     system = build_system(config.system.name, config.system.parameters)
     best = load_model(checkpoints.best)
-    factory = _ModelFactory(best)
+    factory = ModelFactory(best)
     names = (*config.evaluation.predictors, best.name) if baselines else (best.name,)
 
     result = run_suite(
@@ -177,7 +175,7 @@ def _evaluate(  # noqa: PLR0913
         directory,
         manifest,
         config.evaluation,
-        seed=config.seed,
+        seed=config.run_seed,
         run_id=config.run_id,
         predictors=names,
         factories={best.name: factory},
@@ -233,7 +231,7 @@ def _capture(  # noqa: PLR0913
     *,
     directory: Path,
     manifest: Manifest,
-    factory: _ModelFactory,
+    factory: ModelFactory,
     name: str,
 ) -> SnapshotSet:
     """Keep a few states of each predictor, on every split the suite evaluated."""
@@ -255,56 +253,11 @@ def _capture(  # noqa: PLR0913
                 specs,
                 config.evaluation,
                 substeps=manifest.spec.substeps,
-                seed=config.seed,
+                seed=config.run_seed,
                 factories={name: factory},
             ).snapshots
         )
     return SnapshotSet(tuple(kept))
-
-
-class _ModelFactory:
-    """Hands the harness one already loaded model, whatever case it asks for.
-
-    A predictor factory normally builds something from the context. This one ignores the
-    context apart from checking that the model and the reference solver step by the same
-    interval, because a surrogate scored over a different interval from the truth it is
-    compared against would be measured against the wrong states.
-
-    Args:
-        model: The trained model.
-    """
-
-    def __init__(self, model: SurrogateModel) -> None:
-        self._model = model
-
-    def __call__(self, context: PredictorContext, parameters: PredictorParameters) -> Predictor:
-        """Return the model, once the interval has been checked.
-
-        Args:
-            context: What the harness offers a factory.
-            parameters: None accepted: a trained model's settings are in its checkpoint.
-
-        Returns:
-            The model.
-
-        Raises:
-            ValidationError: If a parameter is given, or the intervals disagree.
-        """
-        if parameters:
-            raise ValidationError(
-                f"the trained predictor {self._model.name!r} takes no parameters, got "
-                f"{sorted(parameters)}"
-            )
-        if abs(self._model.dt - context.reference.dt) > _INTERVAL_ATOL * context.reference.dt:
-            raise ValidationError(
-                f"model {self._model.name!r} steps by {self._model.dt:g} but the dataset "
-                f"stores every {context.reference.dt:g}"
-            )
-        return self._model
-
-
-_INTERVAL_ATOL = 1e-9
-"""Relative agreement required between a model's interval and the stored one."""
 
 
 def _context(directory: Path, manifest: Manifest, config: RunConfig) -> ModelContext:
@@ -314,7 +267,7 @@ def _context(directory: Path, manifest: Manifest, config: RunConfig) -> ModelCon
         static_fields=constant_fields(directory, manifest),
         normalisation=_normalisation(directory, manifest),
         dt=manifest.spec.dt,
-        seed=config.seed,
+        seed=config.run_seed,
     )
 
 
