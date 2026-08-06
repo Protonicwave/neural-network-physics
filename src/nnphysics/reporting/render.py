@@ -113,6 +113,7 @@ def build_document(record: RunRecord, plots: Sequence[PlotRecord] = ()) -> Docum
         Paragraph(_opening(record)),
         *_provenance(record),
         *_settings(result),
+        *_training(record),
         *_reading(result, declared),
     ]
     for split in record.splits:
@@ -395,6 +396,57 @@ def _settings(result: SuiteResult) -> list[Block]:
                 f"Equivariance tested over {settings.symmetry_steps} steps; distributions "
                 f"taken over the last {settings.distribution_window:g} of each rollout.",
             )
+        ),
+    ]
+
+
+def _training(record: RunRecord) -> list[Block]:
+    """How the model was trained, and what each stage of it bought.
+
+    One row per curriculum stage rather than one per epoch. A reader wants to know
+    whether lengthening the rollout helped, and forty rows of a falling loss answer that
+    no better than three do. The full history is in the record for anything that does
+    want every epoch.
+    """
+    history = record.training
+    if history is None:
+        return []
+    stages: list[tuple[str, ...]] = []
+    for steps in dict.fromkeys(entry.curriculum_steps for entry in history.epochs):
+        during = [entry for entry in history.epochs if entry.curriculum_steps == steps]
+        stages.append(
+            (
+                str(steps),
+                f"{during[0].epoch}-{during[-1].epoch}",
+                f"{during[0].validation_error:.4g}",
+                f"{min(entry.validation_error for entry in during):.4g}",
+                f"{sum(entry.seconds for entry in during):.0f}",
+            )
+        )
+    stopped = (
+        f"stopped early after {len(history.epochs)} of {record.config.training.epochs} epochs"
+        if history.stopped_early
+        else f"ran every one of {len(history.epochs)} epochs"
+    )
+    return [
+        Heading("How it was trained"),
+        Bullets(
+            (
+                f"Model {history.model} with {history.n_parameters} trainable parameters.",
+                f"{history.train_windows} training windows per epoch, "
+                f"{history.validation_windows} validation windows.",
+                f"Selected on a {history.validation_steps} step validation rollout, the "
+                f"same horizon in every epoch, and {stopped}.",
+                f"Best at epoch {history.best_epoch} with a validation error of "
+                f"{history.best_validation_error:.4g}, in {history.seconds:.0f} seconds.",
+            )
+        ),
+        Table(
+            headers=("rollout steps", "epochs", "validation at entry", "best", "seconds"),
+            rows=tuple(stages),
+            caption="One row per curriculum stage. A stage that lowers the best "
+            "validation error earned its place; one that does not is capacity spent "
+            "on nothing.",
         ),
     ]
 

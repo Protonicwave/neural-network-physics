@@ -284,3 +284,72 @@ class TestRegimeGap:
 
     def test_a_result_without_both_splits_produces_no_gap(self) -> None:
         assert regime_gap([]) == {}
+
+
+class TestAPredictorThatFailsImmediately:
+    """Nothing that never took a step may be reported as flawless.
+
+    A rollout of one state scores zero on every metric, which is the best score there is.
+    """
+
+    def test_nothing_is_scored_when_no_rollout_takes_a_step(self, dataset: Dataset) -> None:
+        directory, manifest, config = dataset
+        system = system_of(config)
+        cases = load_cases(directory, manifest, system, split=Split.TEST, count=2, steps=STEPS)
+
+        result = evaluate_predictor(
+            system,
+            cases,
+            "refusing",
+            config.evaluation,
+            substeps=manifest.spec.substeps,
+            seed=config.seed,
+            factories={"refusing": _refusing},
+        )
+
+        assert result.metrics == ()
+        assert not result.completed
+        assert all(record.steps_completed == 0 for record in result.rollouts)
+        assert all(record.stop_reason == "failed" for record in result.rollouts)
+        assert all(not record.scalars for record in result.rollouts)
+
+    def test_the_reason_it_stopped_is_recorded(self, dataset: Dataset) -> None:
+        directory, manifest, config = dataset
+        system = system_of(config)
+        cases = load_cases(directory, manifest, system, split=Split.TEST, count=1, steps=STEPS)
+
+        result = evaluate_predictor(
+            system,
+            cases,
+            "refusing",
+            config.evaluation,
+            substeps=manifest.spec.substeps,
+            seed=config.seed,
+            factories={"refusing": _refusing},
+        )
+
+        assert "cannot take this state" in result.rollouts[0].detail
+
+
+class _Refusing:
+    """A predictor that raises on its first step, as a model of the wrong size does."""
+
+    def __init__(self, dt: float) -> None:
+        self._dt = dt
+
+    @property
+    def name(self) -> str:
+        return "refusing"
+
+    @property
+    def dt(self) -> float:
+        return self._dt
+
+    def step(self, state: object) -> object:
+        del state
+        raise ValidationError("cannot take this state")
+
+
+def _refusing(context: Any, parameters: Any) -> Any:
+    del parameters
+    return _Refusing(context.reference.dt)

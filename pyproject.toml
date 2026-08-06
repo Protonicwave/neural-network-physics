@@ -115,6 +115,12 @@ mypy_path = "src"
 module = ["h5py.*"]
 ignore_missing_imports = true
 
+# `Tensor.backward` is the one PyTorch entry point the training loop needs that ships
+# unannotated, and there is no typed way to start a backward pass.
+[[tool.mypy.overrides]]
+module = ["nnphysics.training.loop"]
+disable_error_code = ["no-untyped-call"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Tests mirror the source tree, so two systems give two `test_system.py`. The importlib

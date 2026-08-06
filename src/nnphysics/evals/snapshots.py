@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from nnphysics.core.config import EvaluationConfig
     from nnphysics.core.protocols import System
     from nnphysics.core.types import FloatArray, Trajectory
+    from nnphysics.evals.predictors import PredictorFactory
     from nnphysics.evals.runner import EvaluationCase
 
 __all__ = [
@@ -135,6 +136,7 @@ def capture_snapshots(  # noqa: PLR0913
     substeps: int,
     seed: int,
     horizons: int = DEFAULT_HORIZONS,
+    factories: Mapping[str, PredictorFactory] | None = None,
 ) -> SnapshotSet:
     """Roll each predictor out once more and keep a few states of each.
 
@@ -149,6 +151,7 @@ def capture_snapshots(  # noqa: PLR0913
         substeps: Solver steps per stored interval.
         seed: Root seed of the run.
         horizons: States to keep per rollout, the initial one included.
+        factories: Predictor factories consulted before the registry.
 
     Returns:
         One snapshot per predictor, in the order the specifications were given. A
@@ -168,7 +171,9 @@ def capture_snapshots(  # noqa: PLR0913
     captured: list[Snapshot] = []
     for text in specs:
         spec = parse_spec(text)
-        predictor = build_case_predictor(system, case, spec, substeps=substeps, seed=seed)
+        predictor = build_case_predictor(
+            system, case, spec, substeps=substeps, seed=seed, factories=factories
+        )
         result = roll_out(
             predictor,
             case.initial,
