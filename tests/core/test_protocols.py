@@ -15,6 +15,7 @@ from nnphysics.core.protocols import (
     Invariant,
     Metric,
     Predictor,
+    Refinement,
     Symmetry,
     System,
 )
@@ -115,6 +116,10 @@ class Toy:
     @property
     def symmetries(self) -> tuple[Symmetry, ...]:
         return (Swap(),)
+
+    @property
+    def refinements(self) -> tuple[Refinement, ...]:
+        return ()
 
     def initial_state(self, regime: Regime, rng: np.random.Generator) -> State:
         return State(fields={"x": rng.standard_normal(2) * regime.parameters["rate"]}, time=0.0)

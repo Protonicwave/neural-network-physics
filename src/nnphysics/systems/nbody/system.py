@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from nnphysics.core.protocols import Invariant, Predictor, Symmetry
+from nnphysics.core.protocols import Invariant, Predictor, Refinement, Symmetry
 from nnphysics.systems.base import SystemParameters, check_parameter_names, float_parameter
 from nnphysics.systems.nbody.dynamics import NBodyDynamics
 from nnphysics.systems.nbody.initial_conditions import NBODY_REGIMES, initial_state
@@ -86,6 +86,15 @@ class NBodySystem:
             Rotation(0.7),
             GalileanBoost((0.3, -0.2)),
         )
+
+    @property
+    def refinements(self) -> tuple[Refinement, ...]:
+        """None. A set of point masses is not a discretisation of anything.
+
+        There is no finer version of thirty two bodies, so the resolution question does
+        not apply here and is not answered with a number that would look like one.
+        """
+        return ()
 
     def initial_state(self, regime: Regime, rng: np.random.Generator) -> State:
         """Draw one initial condition from a regime.

@@ -26,6 +26,7 @@ from nnphysics.core.protocols import (
     Invariant,
     Metric,
     Predictor,
+    Refinement,
     Symmetry,
     System,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "NNPhysicsError",
     "NumericalError",
     "Predictor",
+    "Refinement",
     "Regime",
     "Registry",
     "RegistryError",
