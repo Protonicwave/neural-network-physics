@@ -24,17 +24,30 @@ if TYPE_CHECKING:
     from nnphysics.core.types import FloatArray, Trajectory
 
 __all__ = [
+    "DEFAULT_CALIBRATION_LEVELS",
     "DEFAULT_ERROR_THRESHOLDS",
+    "DEFAULT_TRUST_THRESHOLD",
     "METRICS",
     "MetricContext",
     "MetricFactory",
     "build_metrics",
+    "normalised_magnitude",
     "relative_error",
 ]
 
 DEFAULT_ERROR_THRESHOLDS = (0.01, 0.1, 1.0)
 """Normalised error levels a horizon is reported for: one per cent, ten per cent, and
 error as large as the signal itself."""
+
+DEFAULT_TRUST_THRESHOLD = 0.1
+"""Normalised error at which a prediction stops being worth using. The middle of the
+declared error thresholds: a tenth of the signal is where a rollout has visibly stopped
+tracking the truth but has not yet become nonsense."""
+
+DEFAULT_CALIBRATION_LEVELS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+"""Nominal coverage levels a reliability diagram is drawn at. Deciles, because a diagram
+of a handful of points says as much as one of a hundred and the tails are where a
+predictive spread is least trustworthy anyway."""
 
 _NORM_FLOOR = 1.0e-12
 """Relative to a trajectory's own largest norm, below which a reference state is treated
@@ -63,6 +76,9 @@ class MetricContext:
             distributional statistics are computed over.
         divergence_factor: Passed to any rollout a metric drives itself, so that a metric
             cannot produce a trajectory the main driver would have abandoned.
+        trust_threshold: Normalised error at which a prediction stops being worth using.
+            What a predictor's own uncertainty is asked to warn about before it happens.
+        calibration_levels: Nominal coverage levels a reliability diagram is drawn at.
     """
 
     invariants: tuple[Invariant, ...] = ()
@@ -74,6 +90,8 @@ class MetricContext:
     resolution_steps: int = 16
     distribution_window: float = 0.25
     divergence_factor: float = 1.0e3
+    trust_threshold: float = DEFAULT_TRUST_THRESHOLD
+    calibration_levels: tuple[float, ...] = DEFAULT_CALIBRATION_LEVELS
 
     def __post_init__(self) -> None:
         if any(threshold <= 0.0 for threshold in self.thresholds):
@@ -90,6 +108,16 @@ class MetricContext:
             raise ValidationError(
                 f"the distribution window must be a fraction in (0, 1], got "
                 f"{self.distribution_window}"
+            )
+        if self.trust_threshold <= 0.0:
+            raise ValidationError(
+                f"the trust threshold must be positive, got {self.trust_threshold}"
+            )
+        if not self.calibration_levels:
+            raise ValidationError("a reliability diagram needs at least one coverage level")
+        if any(not 0.0 < level < 1.0 for level in self.calibration_levels):
+            raise ValidationError(
+                f"calibration levels must be probabilities in (0, 1), got {self.calibration_levels}"
             )
 
     def require_predictor(self, metric: str) -> Predictor:
@@ -175,6 +203,50 @@ def relative_error(
     stacked = np.stack([per_field[name] for name in sorted(per_field)])
     aggregate: FloatArray = np.sqrt(np.mean(stacked**2, axis=0))
     return per_field, aggregate
+
+
+def normalised_magnitude(values: Trajectory, reference: Trajectory) -> FloatArray:
+    """Size of a trajectory of per element quantities, against the size of the reference.
+
+    The same normalisation `relative_error` applies to a residual, applied to something
+    that is not a residual. A predictive spread is the case this exists for: a spread of
+    0.3 means nothing until it is put beside a state whose own size is 0.3 or 300, and
+    putting it on the same scale as the error is what lets the two be compared at all.
+
+    Args:
+        values: Per element quantities over the same steps as the reference, for example
+            a standard deviation per field.
+        reference: Ground truth over those steps.
+
+    Returns:
+        One number per step, fields combined as a root mean square exactly as
+        `relative_error` combines them.
+
+    Raises:
+        ValidationError: If the trajectories differ in length or in fields.
+    """
+    if len(values) != len(reference):
+        raise ValidationError(
+            f"cannot normalise {len(values)} steps against {len(reference)} steps"
+        )
+    if set(values.names) != set(reference.names):
+        raise ValidationError(f"cannot normalise fields {values.names} against {reference.names}")
+    per_field = [
+        _field_magnitude(values.fields[name], reference.fields[name])
+        for name in sorted(reference.names)
+    ]
+    aggregate: FloatArray = np.sqrt(np.mean(np.stack(per_field) ** 2, axis=0))
+    return aggregate
+
+
+def _field_magnitude(values: FloatArray, reference: FloatArray) -> FloatArray:
+    """Size of one field's quantities at every step, against the reference field."""
+    axes = tuple(range(1, reference.ndim))
+    size: FloatArray = np.sqrt(np.sum(values**2, axis=axes))
+    magnitude: FloatArray = np.sqrt(np.sum(reference**2, axis=axes))
+    floor = _NORM_FLOOR * max(float(np.max(magnitude)), 1.0)
+    scaled: FloatArray = size / np.maximum(magnitude, floor)
+    return scaled
 
 
 def _field_error(predicted: FloatArray, reference: FloatArray) -> FloatArray:

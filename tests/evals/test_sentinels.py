@@ -16,7 +16,7 @@ from collections.abc import Callable
 import pytest
 
 from nnphysics.core.types import MetricResult
-from nnphysics.evals.metrics import NEVER_REACHED
+from nnphysics.evals.metrics import NEVER_REACHED, ONE_SIGMA_COVERAGE
 
 Score = Callable[..., dict[str, MetricResult]]
 
@@ -267,6 +267,73 @@ class TestDistributionDrift:
         scored = score_nbody("persistence", steps=STEPS, metrics=["distribution_drift"])
 
         assert scored["distribution_drift"].scalars["worst"] > 0.01
+
+
+class TestCalibration:
+    """The two fixtures differ only in what they claim.
+
+    So the metric can only be measuring the claim.
+    """
+
+    def test_the_overconfident_predictor_is_caught_and_the_honest_one_is_not(
+        self, score: Score
+    ) -> None:
+        honest = score("calibrated", steps=STEPS, metrics=["calibration"])
+        broken = score("overconfident", steps=STEPS, metrics=["calibration"])
+
+        assert broken["calibration"].scalars["ece"] > 0.4
+        assert honest["calibration"].scalars["ece"] < broken["calibration"].scalars["ece"] / 2.0
+
+    def test_the_overconfident_predictor_covers_almost_nothing_it_claims(
+        self, score: Score
+    ) -> None:
+        scored = score("overconfident", steps=STEPS, metrics=["calibration"])
+
+        assert scored["calibration"].scalars["coverage"] < 0.05
+
+    def test_the_honest_predictor_covers_far_more_of_what_it_claims(self, score: Score) -> None:
+        """Not the Gaussian's own figure, and deliberately so.
+
+        The fixtures add noise to a real system, whose dynamics amplify a perturbation
+        faster than a random walk accumulates one, so an honest claim about the noise
+        still understates the error. That gap is a fact about the systems, which is why
+        this brackets the coverage rather than naming it.
+        """
+        scored = score("calibrated", steps=STEPS, metrics=["calibration"])
+
+        assert scored["calibration"].scalars["coverage"] > 0.2
+        assert scored["calibration"].scalars["coverage"] < ONE_SIGMA_COVERAGE * 1.5
+
+    def test_the_claim_is_the_only_difference_the_metric_can_be_seeing(self, score: Score) -> None:
+        """The point of the pair, made exactly.
+
+        The same fixture at two confidences produces bit identical states, because the
+        confidence changes only what is claimed about the noise and not the noise. Every
+        metric that looks at states alone therefore rates the two the same, and the
+        calibration error is the only number that moves.
+        """
+        honest = score("overconfident:factor=1", steps=STEPS)
+        broken = score("overconfident:factor=100", steps=STEPS)
+
+        for metric, key in (
+            ("one_step_error", "error"),
+            ("rollout_error", "error.final"),
+            ("invariant_drift", "worst_violation"),
+            ("distribution_drift", "worst"),
+        ):
+            assert honest[metric].scalars[key] == broken[metric].scalars[key]
+
+        assert broken["calibration"].scalars["ece"] > honest["calibration"].scalars["ece"] * 2.0
+
+    def test_a_predictor_that_states_nothing_is_not_scored(self, score: Score) -> None:
+        """Every other predictor in the suite.
+
+        Reporting zero steps rather than a perfect calibration is what stops the metric
+        flattering six predictors that never made a claim.
+        """
+        scored = score("persistence", steps=STEPS, metrics=["calibration"])
+
+        assert scored["calibration"].scalars == {"steps": 0.0}
 
 
 class TestEveryBrokenPredictorIsCaughtBySomething:

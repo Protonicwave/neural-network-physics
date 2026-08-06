@@ -22,6 +22,7 @@ __all__ = [
     "ENV_NESTING",
     "ENV_PREFIX",
     "DataConfig",
+    "EnsembleConfig",
     "EvaluationConfig",
     "ModelConfig",
     "RunConfig",
@@ -243,6 +244,10 @@ class EvaluationConfig(FrozenConfig):
             distributional statistics are computed over.
         divergence_factor: How far past its initial scale a state may go before a rollout
             is abandoned and the reason recorded.
+        trust_threshold: Normalised error at which a prediction stops being worth using.
+            A predictor that states an uncertainty is asked whether it warned before the
+            error reached this, which is the practically useful form of the question.
+        calibration_levels: Nominal coverage levels a reliability diagram is drawn at.
     """
 
     name: NonEmptyStr = "default"
@@ -255,6 +260,10 @@ class EvaluationConfig(FrozenConfig):
     resolution_steps: PositiveInt = 16
     distribution_window: Fraction01 = 0.25
     divergence_factor: PositiveFloat = 1.0e3
+    trust_threshold: PositiveFloat = 0.1
+    calibration_levels: tuple[Fraction01, ...] = Field(
+        default=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), min_length=1
+    )
 
     @model_validator(mode="after")
     def _check_names_are_distinct(self) -> Self:
@@ -265,28 +274,65 @@ class EvaluationConfig(FrozenConfig):
         return self
 
 
+class EnsembleConfig(FrozenConfig):
+    """How many models a deep ensemble of this configuration holds.
+
+    Attributes:
+        members: Models trained from different initialisations. Four: enough for a
+            standard deviation to mean anything and few enough to train in sequence on
+            eight cores, which is what a deep ensemble costs.
+    """
+
+    members: PositiveInt = 4
+
+
 class RunConfig(FrozenConfig):
     """Everything one run needs.
 
     Attributes:
         name: Human readable label for the run.
         seed: Root seed every generator is derived from.
+        member: Which member of an ensemble this run trains. Zero is the plain run and is
+            bit for bit what it was before ensembles existed. A non zero index shifts the
+            seed everything except the dataset is drawn from, so members differ in
+            initialisation and in shuffling while training on exactly the same data. It
+            is part of the configuration rather than a command line flag because it
+            changes the weights, and anything that changes the weights has to change the
+            run identifier.
         output_dir: Directory run artefacts are written under.
         system: System selection.
         data: Data generation and splitting.
         model: Model selection.
         training: Training loop settings.
         evaluation: Evaluation suite settings.
+        ensemble: How many members a deep ensemble of this configuration holds.
     """
 
     name: NonEmptyStr
     seed: int = Field(default=0, ge=0)
+    member: int = Field(default=0, ge=0)
     output_dir: Path = Path("runs")
     system: SystemConfig
     data: DataConfig
     model: ModelConfig
     training: TrainingConfig = TrainingConfig()
     evaluation: EvaluationConfig
+    ensemble: EnsembleConfig = EnsembleConfig()
+
+    @property
+    def run_seed(self) -> int:
+        """Seed everything except the dataset is derived from.
+
+        The dataset reads `seed` directly, so it does not move when the member does: two
+        members that trained on different data would be measuring the data rather than
+        the initialisation, and the disagreement between them would mean nothing.
+        """
+        if self.member == 0:
+            return self.seed
+        digest = hashlib.blake2b(
+            f"{self.seed}.member.{self.member}".encode(), digest_size=4
+        ).digest()
+        return int.from_bytes(digest, "big")
 
     @property
     def run_id(self) -> str:
@@ -302,6 +348,28 @@ class RunConfig(FrozenConfig):
     def run_dir(self) -> Path:
         """Directory this run's artefacts belong in."""
         return self.output_dir / f"{self.name}-{self.run_id}"
+
+    def for_member(self, member: int) -> RunConfig:
+        """The same configuration as one member of its own ensemble.
+
+        Args:
+            member: Index of the member. Zero gives back a configuration equal to this
+                one with its member index cleared, which is the plain run.
+
+        Returns:
+            The member's configuration, with its own identifier and its own run
+            directory but the same dataset.
+
+        Raises:
+            ConfigurationError: If the index is negative or is not a member this
+                configuration's ensemble has.
+        """
+        if not 0 <= member < self.ensemble.members:
+            raise ConfigurationError(
+                f"member {member} is not one of the {self.ensemble.members} this "
+                f"configuration declares"
+            )
+        return self.model_copy(update={"member": member})
 
 
 def load_run_config(path: Path, env: Mapping[str, str] | None = None) -> RunConfig:

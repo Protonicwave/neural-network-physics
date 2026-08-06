@@ -12,6 +12,7 @@ from nnphysics.evals.predictors import (
     BROKEN_PREDICTORS,
     PREDICTORS,
     REFERENCE_NAME,
+    UNCERTAIN_PREDICTORS,
     PredictorContext,
     build_predictor,
     parse_spec,
@@ -103,9 +104,13 @@ class TestParsing:
 
 class TestRegistry:
     def test_every_predictor_the_plan_names_is_registered(self) -> None:
-        assert set(PREDICTORS.names()) == {REFERENCE_NAME, *BROKEN_PREDICTORS}
+        assert set(PREDICTORS.names()) == {
+            REFERENCE_NAME,
+            *BROKEN_PREDICTORS,
+            *UNCERTAIN_PREDICTORS,
+        }
 
-    @pytest.mark.parametrize("name", [REFERENCE_NAME, *BROKEN_PREDICTORS])
+    @pytest.mark.parametrize("name", [REFERENCE_NAME, *BROKEN_PREDICTORS, *UNCERTAIN_PREDICTORS])
     def test_a_registered_name_builds_something_that_steps(self, name: str) -> None:
         built = build_predictor(name, context())
 

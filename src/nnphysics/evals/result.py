@@ -67,6 +67,8 @@ class SuiteSettings(Record):
         resolution_steps: Steps the resolution generalisation test rolled out for.
         distribution_window: Fraction of the rollout the distributions were taken over.
         divergence_factor: How far past its initial scale a state could go.
+        trust_threshold: Normalised error a stated uncertainty was asked to warn about.
+        calibration_levels: Nominal coverage levels the reliability curve was drawn at.
     """
 
     name: str = Field(min_length=1)
@@ -81,6 +83,11 @@ class SuiteSettings(Record):
     resolution_steps: int = Field(default=16, ge=1)
     distribution_window: float = Field(gt=0.0, le=1.0)
     divergence_factor: float
+    # Defaulted for the same reason `resolution_steps` is: a result written before the
+    # calibration metric existed still reads back, and says it never ran by carrying no
+    # scalars from it.
+    trust_threshold: float = Field(default=0.1, gt=0.0)
+    calibration_levels: tuple[float, ...] = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 
 
 class InvariantRecord(Record):
