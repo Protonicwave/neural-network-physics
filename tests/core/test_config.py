@@ -5,6 +5,7 @@ import pytest
 
 from nnphysics.core.config import load_run_config
 from nnphysics.core.errors import ConfigurationError
+from nnphysics.data.layout import dataset_id
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -202,3 +203,75 @@ def test_run_id_changes_when_a_default_is_set_explicitly_to_something_else(
 def test_run_dir_carries_the_name_and_the_run_id(tmp_path: Path) -> None:
     config = load_run_config(write(tmp_path, MINIMAL))
     assert config.run_dir == Path("runs") / f"unit-{config.run_id}"
+
+
+class TestEnsembleMembers:
+    """The rule an ensemble's spread means anything under.
+
+    Members differ in their initialisation and not in their data.
+    """
+
+    def test_member_zero_is_the_plain_run(self, tmp_path: Path) -> None:
+        config = load_run_config(write(tmp_path, MINIMAL))
+
+        assert config.member == 0
+        assert config.run_seed == config.seed
+        assert config.for_member(0) == config
+
+    def test_a_later_member_draws_from_a_different_seed(self, tmp_path: Path) -> None:
+        config = load_run_config(write(tmp_path, MINIMAL))
+
+        seeds = {config.for_member(index).run_seed for index in range(config.ensemble.members)}
+
+        assert len(seeds) == config.ensemble.members
+
+    def test_the_member_seed_is_a_function_of_the_run_seed_and_the_index(
+        self, tmp_path: Path
+    ) -> None:
+        """Derived rather than drawn.
+
+        The same configuration gives the same members however many times it is resolved.
+        """
+        first = load_run_config(write(tmp_path, MINIMAL))
+        again = load_run_config(write(tmp_path, MINIMAL))
+
+        assert first.for_member(2).run_seed == again.for_member(2).run_seed
+
+    def test_changing_the_root_seed_moves_every_member(self, tmp_path: Path) -> None:
+        config = load_run_config(write(tmp_path, MINIMAL))
+        other = load_run_config(write(tmp_path, MINIMAL.replace("seed: 7", "seed: 8")))
+
+        assert config.for_member(1).run_seed != other.for_member(1).run_seed
+
+    def test_the_dataset_does_not_depend_on_the_member(self, tmp_path: Path) -> None:
+        """The rule the whole estimate rests on.
+
+        Members trained on different data would be measuring the data rather than the
+        initialisation, and their disagreement would mean nothing.
+        """
+        config = load_run_config(write(tmp_path, MINIMAL))
+        identifiers = {
+            dataset_id(config.for_member(index)) for index in range(config.ensemble.members)
+        }
+
+        assert len(identifiers) == 1
+
+    def test_each_member_gets_its_own_run_identifier(self, tmp_path: Path) -> None:
+        """Anything that changes the weights has to change the identifier.
+
+        Two members that hashed alike would write over each other.
+        """
+        config = load_run_config(write(tmp_path, MINIMAL))
+
+        identifiers = {config.for_member(index).run_id for index in range(config.ensemble.members)}
+
+        assert len(identifiers) == config.ensemble.members
+
+    @pytest.mark.parametrize("index", [-1, 4, 99])
+    def test_a_member_the_ensemble_does_not_have_is_refused(
+        self, tmp_path: Path, index: int
+    ) -> None:
+        config = load_run_config(write(tmp_path, MINIMAL))
+
+        with pytest.raises(ConfigurationError, match="is not one of"):
+            config.for_member(index)

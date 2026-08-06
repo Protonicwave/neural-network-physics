@@ -29,6 +29,7 @@ from nnphysics.models.baselines import (
     build_constant,
     build_mlp,
 )
+from nnphysics.models.ensemble import ENSEMBLE_NAME, Ensemble
 from nnphysics.models.graph import GRAPH_NAME, NBodyGraphModel, build_graph
 from nnphysics.models.operator import (
     CONVOLUTION_NAME,
@@ -49,6 +50,7 @@ __all__ = [
     "CHECKPOINT_SCHEMA_VERSION",
     "CONSTANT_NAME",
     "CONVOLUTION_NAME",
+    "ENSEMBLE_NAME",
     "GRAPH_NAME",
     "MLP_NAME",
     "MODELS",
@@ -56,6 +58,7 @@ __all__ = [
     "Carry",
     "ConstantModel",
     "ConvolutionalBaseline",
+    "Ensemble",
     "FourierNeuralOperator",
     "ModelContext",
     "ModelFactory",
