@@ -6,12 +6,9 @@ from typer.testing import CliRunner
 from nnphysics import __version__
 from nnphysics.cli.app import app
 
-SUBCOMMANDS = ("diagnose",)
-"""Commands still waiting on the phase that fills them in."""
-
-GROUPS = ("data", "eval", "report", "train")
-"""Commands a phase has implemented, each tested in its own module."""
-EXAMPLE = Path(__file__).resolve().parents[2] / "configs" / "example.yaml"
+COMMANDS = ("data", "eval", "ensemble", "report", "train", "benchmark", "diagnose")
+"""Every command the plan names. All of them are implemented, so there is no longer a
+placeholder to test: each is covered in its own module."""
 
 
 @pytest.fixture
@@ -22,7 +19,7 @@ def runner() -> CliRunner:
 def test_help_lists_every_subcommand(runner: CliRunner) -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in (*SUBCOMMANDS, *GROUPS):
+    for name in COMMANDS:
         assert name in result.stdout
 
 
@@ -38,18 +35,12 @@ def test_no_arguments_shows_usage(runner: CliRunner) -> None:
     assert "Usage" in result.output
 
 
-@pytest.mark.parametrize("name", SUBCOMMANDS)
-def test_each_subcommand_exits_cleanly_without_a_config(runner: CliRunner, name: str) -> None:
-    result = runner.invoke(app, [name])
+@pytest.mark.parametrize("name", COMMANDS)
+def test_each_command_describes_itself(runner: CliRunner, name: str) -> None:
+    """A command that cannot say what it does is a command nobody will find."""
+    result = runner.invoke(app, [name, "--help"])
     assert result.exit_code == 0
-    assert "Not implemented yet" in result.stdout
-
-
-@pytest.mark.parametrize("name", SUBCOMMANDS)
-def test_each_subcommand_reports_the_run_it_would_act_on(runner: CliRunner, name: str) -> None:
-    result = runner.invoke(app, [name, "--config", str(EXAMPLE)])
-    assert result.exit_code == 0
-    assert "run example" in result.stdout
+    assert "Usage" in result.output
 
 
 def test_an_invalid_config_exits_with_a_message_not_a_traceback(
