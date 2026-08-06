@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from nnphysics.core.types import (
         MetricResult,
+        Prediction,
         Regime,
         Rollout,
         State,
@@ -30,6 +31,7 @@ __all__ = [
     "Refinement",
     "Symmetry",
     "System",
+    "UncertainPredictor",
 ]
 
 
@@ -167,6 +169,30 @@ class Predictor(Protocol):
 
     def step(self, state: State) -> State:
         """Advance one step and return the new state."""
+        ...
+
+
+@runtime_checkable
+class UncertainPredictor(Predictor, Protocol):
+    """A predictor that also says how uncertain it is about what it just produced.
+
+    An extension rather than a change, because most predictors have nothing to say here
+    and a solver that had to invent a confidence would be inventing exactly the number
+    this exists to measure. A predictor that implements this is asked for `predict`; one
+    that does not is asked for `step` and reports no spread.
+
+    The claim is judged, not trusted. A predictor is free to declare a spread a hundred
+    times smaller than its own error, and the calibration metric exists to catch one that
+    does.
+    """
+
+    def predict(self, state: State) -> Prediction:
+        """Advance one step and report the uncertainty of the result.
+
+        `predict` and `step` must agree on the state: a predictor that returned one state
+        through one and a different state through the other would be scored on a
+        trajectory it never claimed to produce.
+        """
         ...
 
 

@@ -59,6 +59,7 @@ __all__ = [
     "load_cases",
     "regime_gap",
     "run_suite",
+    "substepped_reference",
 ]
 
 EVAL_SEED_STREAM = "evals.{predictor}.{trajectory}"
@@ -238,6 +239,7 @@ def evaluate_predictor(  # noqa: PLR0913
                 reference=_prefix(case.reference, len(result.trajectory)),
                 predictor=result.predictor,
                 system=system.name,
+                spread=result.spread,
             )
             metrics = build_metrics(
                 config.metrics, _metric_context(system, case, predictor, config)
@@ -443,7 +445,7 @@ def build_case_predictor(  # noqa: PLR0913
     return build_predictor(
         spec,
         PredictorContext(
-            reference=_reference_predictor(system, case, substeps),
+            reference=substepped_reference(system, case, substeps),
             state_spec=system.state_spec,
             symmetries=system.symmetries,
             seed=seed,
@@ -453,8 +455,23 @@ def build_case_predictor(  # noqa: PLR0913
     )
 
 
-def _reference_predictor(system: System, case: EvaluationCase, substeps: int) -> Predictor:
-    """The system's solver, stepping one stored interval at a time."""
+def substepped_reference(system: System, case: EvaluationCase, substeps: int) -> Predictor:
+    """The system's solver, stepping one stored interval at a time.
+
+    Public because the substep count is the one knob the solver has, and the matched
+    accuracy comparison turns it: the honest question is not whether a surrogate beats the
+    solver at the settings the data was generated with, it is whether it beats the solver
+    run as coarsely as it can be while still being as accurate as the surrogate.
+
+    Args:
+        system: The system, seen only through the protocol.
+        case: The initial condition and its ground truth, which fixes the stored interval.
+        substeps: Solver steps folded into each stored interval. The dataset's own value
+            reproduces ground truth exactly; a smaller one is cheaper and less accurate.
+
+    Returns:
+        The solver, advancing one stored interval per step.
+    """
     stored_dt = float(case.reference.times[1] - case.reference.times[0])
     return Substepped(system.reference_predictor(case.regime, stored_dt / substeps), substeps)
 
@@ -473,6 +490,8 @@ def _metric_context(
         resolution_steps=config.resolution_steps,
         distribution_window=config.distribution_window,
         divergence_factor=config.divergence_factor,
+        trust_threshold=config.trust_threshold,
+        calibration_levels=config.calibration_levels,
     )
 
 
@@ -501,6 +520,8 @@ def _settings(config: EvaluationConfig) -> SuiteSettings:
         resolution_steps=config.resolution_steps,
         distribution_window=config.distribution_window,
         divergence_factor=config.divergence_factor,
+        trust_threshold=config.trust_threshold,
+        calibration_levels=config.calibration_levels,
     )
 
 

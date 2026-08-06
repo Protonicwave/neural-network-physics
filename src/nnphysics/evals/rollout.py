@@ -8,6 +8,10 @@ recorded on the stepping alone, since the whole speedup claim of a surrogate res
 Divergence is judged against the initial state rather than against ground truth. The
 driver never sees ground truth: it is handed a predictor and a state, which is all a
 predictor needs, and comparing against the reference is the metrics' job.
+
+A predictor that declares an uncertainty is asked for it here rather than by a metric
+running the rollout a second time. The spread belongs to the states this rollout actually
+produced, so recording it beside them costs nothing and keeps the two from disagreeing.
 """
 
 from __future__ import annotations
@@ -20,13 +24,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from nnphysics.core.errors import NNPhysicsError, ValidationError
-from nnphysics.core.types import Trajectory
+from nnphysics.core.protocols import UncertainPredictor
+from nnphysics.core.types import State, Trajectory
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from nnphysics.core.protocols import Predictor
-    from nnphysics.core.types import State
+    from nnphysics.core.types import FloatArray
 
 __all__ = [
     "DEFAULT_DIVERGENCE_FACTOR",
@@ -81,6 +86,9 @@ class RolloutResult:
         steps_requested: Steps that were asked for.
         stop_reason: Why the rollout ended.
         detail: What the predictor said, when it stopped by raising. Empty otherwise.
+        spread: The predictor's own uncertainty at each recorded state, or `None` if it
+            declared none. Zero at the initial state, which was handed in rather than
+            predicted.
     """
 
     trajectory: Trajectory
@@ -89,6 +97,7 @@ class RolloutResult:
     steps_requested: int
     stop_reason: StopReason
     detail: str = ""
+    spread: Trajectory | None = None
 
     @property
     def steps_completed(self) -> int:
@@ -133,7 +142,11 @@ def roll_out(
         raise ValidationError(f"a rollout must take at least one step, got {steps}")
 
     limit = divergence_factor * max(_state_scale(initial), _SCALE_FLOOR)
+    uncertain: UncertainPredictor | None = (
+        predictor if isinstance(predictor, UncertainPredictor) else None
+    )
     states = [initial]
+    spreads = [_no_spread(initial)] if uncertain is not None else []
     reason = StopReason.COMPLETED
     detail = ""
     elapsed = 0.0
@@ -141,7 +154,11 @@ def roll_out(
     for _ in range(steps):
         started = time.perf_counter()
         try:
-            state = predictor.step(states[-1])
+            if uncertain is not None:
+                prediction = uncertain.predict(states[-1])
+                state, spread = prediction.state, prediction.spread
+            else:
+                state, spread = predictor.step(states[-1]), {}
         except NNPhysicsError as error:
             elapsed += time.perf_counter() - started
             reason = StopReason.FAILED
@@ -159,6 +176,8 @@ def roll_out(
             reason = StopReason.DIVERGED
             break
         states.append(state)
+        if uncertain is not None:
+            spreads.append(State(fields=dict(spread), time=state.time))
 
     return RolloutResult(
         trajectory=Trajectory.from_states(states),
@@ -167,6 +186,7 @@ def roll_out(
         steps_requested=steps,
         stop_reason=reason,
         detail=detail,
+        spread=Trajectory.from_states(spreads) if uncertain is not None else None,
     )
 
 
@@ -202,6 +222,14 @@ def roll_out_many(
         roll_out(predictor, initial, steps, divergence_factor=divergence_factor)
         for initial in initials
     ]
+
+
+def _no_spread(state: State) -> State:
+    """Zero uncertainty in every field, at the time of a state that was handed in."""
+    fields: Mapping[str, FloatArray] = {
+        name: np.zeros_like(array) for name, array in state.fields.items()
+    }
+    return State(fields=fields, time=state.time)
 
 
 def _is_finite(state: State) -> bool:
