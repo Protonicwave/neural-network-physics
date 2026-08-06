@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nnphysics.agent.causes import Cause
 from nnphysics.agent.client import AgentConfig
-from nnphysics.agent.diagnose import DiagnosisCost
+from nnphysics.agent.diagnose import RULE_SOURCE, DiagnosisCost
 
 if TYPE_CHECKING:
     from nnphysics.agent.diagnose import Diagnosis
@@ -154,6 +154,9 @@ class SuiteReport(BaseModel):
         system: System the faults were injected into.
         baseline_run: Run identifier of the known good run every fault was compared to.
         agent: The settings the agent was called under, or `None` if it was not called.
+        provenance: How this report was produced, in the reader's own terms. Required,
+            because a committed table of accuracies that does not say what produced it is
+            a number a reader has to take on trust.
         cards: One per diagnoser scored.
     """
 
@@ -163,6 +166,7 @@ class SuiteReport(BaseModel):
     system: str = Field(min_length=1)
     baseline_run: str = Field(min_length=1)
     agent: AgentConfig | None = None
+    provenance: str = Field(min_length=1)
     cards: tuple[ScoreCard, ...] = Field(min_length=1)
 
 
@@ -232,6 +236,10 @@ def render_report(report: SuiteReport) -> str:
         "causes. The true cause is known before the question is asked. Both diagnosers "
         "choose from the same twelve cause labels, five of which no fault uses.",
         "",
+        "## How this was produced",
+        "",
+        report.provenance,
+        "",
         "## Accuracy",
         "",
         "| Diagnoser | model | top 1 | top 3 | named at all | mean rank when named | "
@@ -244,7 +252,7 @@ def render_report(report: SuiteReport) -> str:
             f"| `{card.source}` | {card.model} | {card.accuracy(1):.0%} | "
             f"{card.accuracy(3):.0%} | {card.found} of {len(card.outcomes)} | "
             f"{'n/a' if mean is None else f'{mean:.2f}'} | "
-            f"${card.dollars_per_diagnosis:.4f} |"
+            f"{_cost(card)} |"
         )
     lines += ["", "## Per fault", ""]
     for card in report.cards:
@@ -261,12 +269,28 @@ def render_report(report: SuiteReport) -> str:
                 f"`{outcome.named[0].value}` | {outcome.confidence:.2f} |"
             )
         lines.append("")
-    total = report.cards[0].cost
+    lines += ["## Cost", ""]
+    for card in report.cards:
+        total = card.cost
+        lines.append(
+            f"- `{card.source}`: {total.input_tokens} input and {total.output_tokens} "
+            f"output tokens over the whole suite, {_cost(card)} per diagnosis."
+        )
     lines += [
-        "## Cost",
-        "",
-        f"Tokens over the whole suite, first card: {total.input_tokens} in, "
-        f"{total.output_tokens} out, ${total.dollars:.4f} at the configured prices.",
         "",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _cost(card: ScoreCard) -> str:
+    """What one diagnosis cost, or that nobody measured it.
+
+    A diagnoser that reported no tokens at all was not free, it was unmetered. The rule
+    based one genuinely is free, and it says so in its own row: it is the zero token case
+    that has to be distinguished from a zero dollar one, and `not measured` is what
+    distinguishes them.
+    """
+    total = card.cost
+    if not total.input_tokens and not total.output_tokens:
+        return "free" if card.source == RULE_SOURCE else "not measured"
+    return f"${card.dollars_per_diagnosis:.4f}"

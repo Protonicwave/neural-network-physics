@@ -179,6 +179,11 @@ def score(  # noqa: PLR0913, PLR0917
             system=resolved.system.name,
             baseline_run=baseline.run_id,
             agent=settings,
+            provenance=(
+                f"Produced by `nnp diagnose score --config {config}`"
+                + ("" if settings is None else f" against `{settings.model}`")
+                + ". Every number in it comes from that command."
+            ),
             cards=tuple(cards),
         )
     except NNPhysicsError as error:

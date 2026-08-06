@@ -144,6 +144,7 @@ class TestRenderReport:
             system="nbody",
             baseline_run="0123456789abcdef",
             agent=AgentConfig(model="claude-recorded-1"),
+            provenance="Produced by a test.",
             cards=(card,),
         )
 
@@ -167,6 +168,48 @@ class TestRenderReport:
     def test_the_cost_per_diagnosis_is_stated(self) -> None:
         """A table without it cannot say whether the agent is worth what it costs."""
         assert "cost per diagnosis" in render_report(self._report())
+
+    def test_the_report_says_how_it_was_produced(self) -> None:
+        """A committed table that does not say what produced it must be taken on trust."""
+        text = render_report(self._report())
+
+        assert "## How this was produced" in text
+        assert "Produced by a test." in text
+
+    def test_an_unmetered_card_is_not_reported_as_free(self) -> None:
+        """A diagnoser that reported no tokens was unmetered, not free."""
+        card = score_card(
+            "agent", "test", [score_fault(entry, _diagnosis([entry.cause])) for entry in FAULTS]
+        )
+        report = SuiteReport(
+            created="2026-01-01T00:00:00+00:00",
+            system="nbody",
+            baseline_run="0123456789abcdef",
+            provenance="Produced by a test.",
+            cards=(card,),
+        )
+
+        text = render_report(report)
+
+        assert "not measured" in text
+        assert "$0.0000" not in text
+
+    def test_the_rule_based_diagnoser_is_reported_as_free(self) -> None:
+        """It genuinely is: it calls nothing. That is the case `not measured` is not."""
+        card = score_card(
+            RULE_SOURCE,
+            "worst regressed metric",
+            [score_fault(entry, _diagnosis([entry.cause])) for entry in FAULTS],
+        )
+        report = SuiteReport(
+            created="2026-01-01T00:00:00+00:00",
+            system="nbody",
+            baseline_run="0123456789abcdef",
+            provenance="Produced by a test.",
+            cards=(card,),
+        )
+
+        assert "free" in render_report(report)
 
     def test_the_report_is_json_serialisable(self) -> None:
         payload = self._report().model_dump_json()
