@@ -22,6 +22,7 @@ from nnphysics.systems.fluid.initial_conditions import (
 )
 from nnphysics.systems.fluid.integrators import DEFAULT_CFL_NUMBER, IntegratingFactorRK4
 from nnphysics.systems.fluid.invariants import ENSTROPHY, SPECIFIC_ENERGY, Enstrophy, KineticEnergy
+from nnphysics.systems.fluid.refinement import SpectralRefinement
 from nnphysics.systems.fluid.symmetries import QuarterTurn, Translation
 from nnphysics.systems.fluid.system import FluidSystem, build_fluid
 
@@ -40,6 +41,7 @@ __all__ = [
     "KineticEnergy",
     "QuarterTurn",
     "SpectralOperators",
+    "SpectralRefinement",
     "Translation",
     "build_fluid",
     "characteristic_length",

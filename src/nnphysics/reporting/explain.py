@@ -143,6 +143,13 @@ METRIC_SUMMARIES: Mapping[str, str] = {
         "they have stopped tracking the true ones. Two chaotic trajectories part "
         "whatever produced them; a cluster that is no longer a cluster is a real fault."
     ),
+    "resolution_generalisation": (
+        "Whether the predictor means the same thing on a finer grid than the one it was "
+        "fitted on. Refine the initial condition, roll forward there, coarsen back. A "
+        "predictor whose parameters describe the physics should agree with itself; one "
+        "whose parameters describe the grid should not. A system whose states are not a "
+        "discretisation of anything is not tested, and reports zero steps."
+    ),
     TIMING_METRIC: (
         "What the predictor cost to run. A surrogate earns its place by being faster "
         "than the solver at an accuracy someone is willing to accept."
@@ -224,6 +231,33 @@ _EXACT: Mapping[str, Mapping[str, _Rule]] = {
             _STEPS,
             Direction.NEUTRAL,
             "States at the end of the rollout the distributions were taken over.",
+        ),
+    },
+    "resolution_generalisation": {
+        "worst_consistency": _Rule(
+            "worst inconsistency",
+            _NORMALISED,
+            Direction.LOWER,
+            "Largest disagreement, over every declared refinement, between the predictor "
+            "run at its native resolution and the same predictor run at the finer one. "
+            "Near zero means the predictor is the same operator on both grids.",
+        ),
+        "worst_degradation": _Rule(
+            "worst degradation",
+            _NORMALISED,
+            Direction.LOWER,
+            "Most the error against ground truth grew when the predictor was run at a "
+            "finer resolution instead of its native one. Ground truth is stored at the "
+            "native resolution, so this also charges the refined rollout for detail the "
+            "finer grid legitimately resolves.",
+        ),
+        "steps": _Rule(
+            "steps tested",
+            _STEPS,
+            Direction.NEUTRAL,
+            "Steps the resolution test rolled out for, shorter than the main rollout "
+            "because the refined rollout works on a state several times the size. Zero "
+            "means the system declares no finer resolution, so nothing was tested.",
         ),
     },
     TIMING_METRIC: {
@@ -309,6 +343,45 @@ _SUFFIXED: Mapping[str, Mapping[str, _Rule]] = {
             _STEPS,
             Direction.NEUTRAL,
             "Steps the test under {name} managed before it stopped.",
+        ),
+    },
+    "resolution_generalisation": {
+        "consistency": _Rule(
+            "{name}: inconsistency",
+            _NORMALISED,
+            Direction.LOWER,
+            "Largest disagreement under {name} between the predictor at its native "
+            "resolution and the same predictor at the finer one, with no ground truth "
+            "involved: this asks whether the predictor is the same operator, not "
+            "whether it is right.",
+        ),
+        "refined_error": _Rule(
+            "{name}: refined error",
+            _NORMALISED,
+            Direction.LOWER,
+            "Error against ground truth of the rollout run at the resolution {name} "
+            "declares, coarsened back for the comparison.",
+        ),
+        "native_error": _Rule(
+            "{name}: native error",
+            _NORMALISED,
+            Direction.LOWER,
+            "Error against ground truth over the same steps at the stored resolution, "
+            "which is what the refined error is measured against.",
+        ),
+        "degradation": _Rule(
+            "{name}: degradation",
+            _NORMALISED,
+            Direction.LOWER,
+            "The refined error under {name} less the native error: what running at the "
+            "finer resolution cost. Negative means it helped.",
+        ),
+        "steps": _Rule(
+            "{name}: steps",
+            _STEPS,
+            Direction.NEUTRAL,
+            "Steps the test under {name} managed. Zero means the predictor could not run "
+            "at that resolution at all, which a solver built for one grid cannot.",
         ),
     },
     "distribution_drift": {

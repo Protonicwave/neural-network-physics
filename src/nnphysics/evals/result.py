@@ -64,6 +64,7 @@ class SuiteSettings(Record):
         n_initial_conditions: Initial conditions drawn from each split.
         error_thresholds: Normalised error levels horizons were reported for.
         symmetry_steps: Steps the equivariance test rolled out for.
+        resolution_steps: Steps the resolution generalisation test rolled out for.
         distribution_window: Fraction of the rollout the distributions were taken over.
         divergence_factor: How far past its initial scale a state could go.
     """
@@ -74,6 +75,10 @@ class SuiteSettings(Record):
     n_initial_conditions: int = Field(ge=1)
     error_thresholds: tuple[float, ...]
     symmetry_steps: int = Field(ge=1)
+    # Defaulted rather than required, so a result written before the resolution metric
+    # existed still reads back. A run that never ran it says so by carrying no scalars
+    # from it, not by refusing to load.
+    resolution_steps: int = Field(default=16, ge=1)
     distribution_window: float = Field(gt=0.0, le=1.0)
     divergence_factor: float
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from nnphysics.core.protocols import Invariant, Predictor, Symmetry
+from nnphysics.core.protocols import Invariant, Predictor, Refinement, Symmetry
 from nnphysics.systems.base import (
     SystemParameters,
     check_parameter_names,
@@ -27,6 +27,7 @@ from nnphysics.systems.fluid.grid import TWO_PI, FluidGrid
 from nnphysics.systems.fluid.initial_conditions import FLUID_REGIMES, initial_state, viscosity
 from nnphysics.systems.fluid.integrators import IntegratingFactorRK4
 from nnphysics.systems.fluid.invariants import Enstrophy, KineticEnergy
+from nnphysics.systems.fluid.refinement import SpectralRefinement
 from nnphysics.systems.fluid.symmetries import QuarterTurn, Translation
 
 if TYPE_CHECKING:
@@ -78,6 +79,17 @@ class FluidSystem:
             Translation(self.grid, (self.grid.size // 4, -(self.grid.size // 8))),
             QuarterTurn(self.grid, 1),
         )
+
+    @property
+    def refinements(self) -> tuple[Refinement, ...]:
+        """The same flow on twice the grid, in each direction.
+
+        One factor rather than several. The claim a neural operator makes is that it is
+        resolution independent, and doubling either finds it false or does not; a third
+        grid costs another rollout of a field four times the size and says the same
+        thing again.
+        """
+        return (SpectralRefinement(self.grid, 2),)
 
     def dynamics(self, regime: Regime) -> FluidDynamics:
         """Build the vorticity equation for a regime.

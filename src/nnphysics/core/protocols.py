@@ -1,4 +1,4 @@
-"""The five protocols the whole design rests on.
+"""The protocols the whole design rests on.
 
 Nothing here is implemented. Systems, models, metrics and the evaluation harness all
 speak through these interfaces, which is what lets one suite score a reference solver,
@@ -27,6 +27,7 @@ __all__ = [
     "Invariant",
     "Metric",
     "Predictor",
+    "Refinement",
     "Symmetry",
     "System",
 ]
@@ -107,6 +108,42 @@ class Symmetry(Protocol):
 
     def apply_inverse(self, state: State) -> State:
         """Undo `apply`."""
+        ...
+
+
+@runtime_checkable
+class Refinement(Protocol):
+    """A change of the resolution a system's states are represented at.
+
+    Some systems discretise a continuous field, and a predictor for one of them may or
+    may not be tied to the discretisation it was fitted at. This is how a system says
+    that the question is askable at all, and how it answers it: the harness refines a
+    state, runs the predictor there, coarsens the result back, and compares. A system
+    whose states are not a discretisation of anything declares none, and the question is
+    not asked of it.
+
+    Coarsening a refined state must return the original exactly, so that a measured
+    disagreement belongs to the predictor rather than to the pair of transformations.
+    The reverse does not hold: refining a coarse state cannot invent detail the coarse
+    one never carried.
+    """
+
+    @property
+    def name(self) -> str:
+        """Identifier used in configuration and in reports."""
+        ...
+
+    @property
+    def factor(self) -> int:
+        """How many times finer the refined representation is, along each axis."""
+        ...
+
+    def refine(self, state: State) -> State:
+        """Express a state at the finer resolution."""
+        ...
+
+    def coarsen(self, state: State) -> State:
+        """Express a state at the original resolution."""
         ...
 
 
@@ -194,6 +231,17 @@ class System(Protocol):
     @property
     def symmetries(self) -> tuple[Symmetry, ...]:
         """Transformations the dynamics commute with."""
+        ...
+
+    @property
+    def refinements(self) -> tuple[Refinement, ...]:
+        """Resolutions the same state can be expressed at, finer than the declared one.
+
+        Empty for a system whose state is not a discretisation of a continuous field,
+        which is the honest answer for a set of point masses: there is no finer version
+        of thirty two bodies. Declaring it rather than leaving it out is what lets the
+        harness ask every system the same question and get an answer either way.
+        """
         ...
 
     def initial_state(self, regime: Regime, rng: np.random.Generator) -> State:

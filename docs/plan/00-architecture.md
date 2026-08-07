@@ -51,7 +51,7 @@ docs/          architecture, results, plan/
 
 ## Core abstractions
 
-Five protocols carry the whole design. Each is defined in `core` and implemented
+Six protocols carry the whole design. Each is defined in `core` and implemented
 outwards.
 
 **System.** Declares what a physical system is: the shape and meaning of its
@@ -67,6 +67,12 @@ than knowing them itself.
 **Symmetry.** A named transformation that can be applied to a state and to a
 prediction. Translation, rotation, reflection. Used to test equivariance without
 the metric knowing what the system is.
+
+**Refinement.** A named change of the resolution a state is represented at, with its
+inverse. Added in phase 08, because a neural operator claims to be a map between
+function spaces rather than between arrays, and the harness has to be able to check
+that without knowing what a resolution is. A system whose state is not a discretisation
+of a continuous field declares none, and is not asked.
 
 **Predictor.** Anything that maps a state to the next state. The reference solver
 is one. A trained network is one. A deliberately broken baseline is one. The

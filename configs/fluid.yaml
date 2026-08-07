@@ -1,6 +1,6 @@
-# Default fluid dataset. The metrics are registered; the model is not, because the neural
-# operator for this system is phase 08. `nnp data` and `nnp eval` run against this file
-# today, `nnp train` will refuse it by name until that phase lands.
+# Default fluid run: the dataset, the neural operator trained on it, and the suite that
+# scores it. The convolutional baseline is the same file with the model name overridden,
+# which is what keeps the comparison a comparison.
 name: fluid
 seed: 0
 output_dir: runs
@@ -34,13 +34,38 @@ data:
   compression_level: 4
 
 model:
-  name: placeholder
+  name: operator
+  hyperparameters:
+    # Eight modes each way against a dealiasing cutoff of 21: the band that carries the
+    # energy is learned as an operator and the tail is left to the pointwise path.
+    modes: 8
+    width: 12
+    layers: 4
+    projection: 64
 
 training:
-  epochs: 50
-  batch_size: 32
+  epochs: 40
+  # Sixteen rather than the N-body thirty two. A 64 by 64 field is a thousand times the
+  # size of an N-body state, so the number of windows an epoch can afford is small, and
+  # what a 149,000 parameter network needs is optimiser steps rather than large ones.
+  # At a stride of four and a batch of thirty two this run took about a thousand steps in
+  # total and converged barely clear of persistence; these settings give it four times
+  # that for twice the wall clock.
+  batch_size: 16
   learning_rate: 0.001
   weight_decay: 0.0
+  warmup_epochs: 2
+  gradient_clip: 1.0
+  patience: 10
+  # Every trajectory is still seen, at one start in two. Measured on eight cores: the
+  # operator trains in 1,941 s and the convolutional baseline, at the same parameter
+  # count, in about 5,800 s.
+  window_stride: 2
+  curriculum: [1, 4, 8]
+  curriculum_epochs: [0, 15, 28]
+  validation_steps: 16
+  multi_step_weight: 1.0
+  physics_weight: 0.0
 
 evaluation:
   name: standard
@@ -50,6 +75,7 @@ evaluation:
     - invariant_drift
     - symmetry_violation
     - distribution_drift
+    - resolution_generalisation
   predictors:
     - reference
     - persistence
@@ -63,5 +89,9 @@ evaluation:
   # Two declared symmetries and a field a thousand times the size of an N-body state, so
   # the equivariance horizon is shorter here than for the N-body suite.
   symmetry_steps: 16
+  # Shorter again: a refined rollout works on a 128 by 128 field, four times the size,
+  # and a predictor that has stopped meaning the same thing on a finer grid shows it
+  # inside a few steps.
+  resolution_steps: 8
   distribution_window: 0.25
   divergence_factor: 1000.0

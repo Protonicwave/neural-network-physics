@@ -8,6 +8,13 @@ cannot tell a broken predictor from an interpolation error is not worth running.
 Vorticity is a pseudoscalar in two dimensions: it transforms as a scalar under rotations
 and changes sign under reflections. Only rotations are declared, so the field is simply
 carried around, never negated.
+
+Neither transformation validates the physics of the field it is handed. A symmetry is
+applied to states a predictor produced, and a predictor that has drifted to carry a mean
+vorticity is exactly the case an equivariance test exists to measure: refusing to
+transform it would turn a measurable fault into a crash, and the metric would report
+nothing about the predictor that most needed reporting on. Whether the field is a
+physical one is the invariant metric's question, and it asks it.
 """
 
 from __future__ import annotations
@@ -18,9 +25,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from nnphysics.core.errors import ValidationError
+from nnphysics.core.types import State
+from nnphysics.systems.fluid.grid import VORTICITY_FIELD
 
 if TYPE_CHECKING:
-    from nnphysics.core.types import FloatArray, State
+    from nnphysics.core.types import FloatArray
     from nnphysics.systems.fluid.grid import FluidGrid
 
 __all__ = ["QuarterTurn", "Translation"]
@@ -70,7 +79,7 @@ class Translation:
     def _shift_by(self, state: State, shift: tuple[int, int]) -> State:
         vorticity = self.grid.unpack(state)
         rolled: FloatArray = np.roll(vorticity, shift, axis=(0, 1))
-        return self.grid.make_state(rolled, time=state.time)
+        return State(fields={VORTICITY_FIELD: rolled}, time=state.time)
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +131,7 @@ class QuarterTurn:
         vorticity = self.grid.unpack(state)
         for _ in range(turns % _QUARTER_TURNS):
             vorticity = _rotate_once(vorticity)
-        return self.grid.make_state(vorticity, time=state.time)
+        return State(fields={VORTICITY_FIELD: vorticity}, time=state.time)
 
 
 def _rotate_once(field: FloatArray) -> FloatArray:

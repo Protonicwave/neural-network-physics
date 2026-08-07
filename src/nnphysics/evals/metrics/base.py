@@ -20,7 +20,7 @@ from nnphysics.core.errors import ValidationError
 from nnphysics.core.registry import Registry
 
 if TYPE_CHECKING:
-    from nnphysics.core.protocols import Invariant, Metric, Predictor, Symmetry
+    from nnphysics.core.protocols import Invariant, Metric, Predictor, Refinement, Symmetry
     from nnphysics.core.types import FloatArray, Trajectory
 
 __all__ = [
@@ -48,11 +48,17 @@ class MetricContext:
     Attributes:
         invariants: Quantities the system declares for the regime being evaluated.
         symmetries: Transformations the system declares its dynamics commute with.
+        refinements: Finer resolutions the system declares its states can be expressed
+            at. Empty for a system whose state is not a discretisation of anything.
         predictor: The predictor being scored, for metrics that must roll it out again.
         thresholds: Normalised error levels a horizon is reported for.
         symmetry_steps: Steps rolled out when testing equivariance. Shorter than the main
             rollout by default, because each symmetry costs another rollout and the
             violation shows up early or not at all.
+        resolution_steps: Steps rolled out when testing resolution generalisation.
+            Shorter again: a refined rollout works on a state several times the size, and
+            a predictor that has stopped meaning the same thing on a finer grid shows it
+            within a few steps.
         distribution_window: Fraction of the rollout, taken from its end, that
             distributional statistics are computed over.
         divergence_factor: Passed to any rollout a metric drives itself, so that a metric
@@ -61,9 +67,11 @@ class MetricContext:
 
     invariants: tuple[Invariant, ...] = ()
     symmetries: tuple[Symmetry, ...] = ()
+    refinements: tuple[Refinement, ...] = ()
     predictor: Predictor | None = None
     thresholds: tuple[float, ...] = DEFAULT_ERROR_THRESHOLDS
     symmetry_steps: int = 32
+    resolution_steps: int = 16
     distribution_window: float = 0.25
     divergence_factor: float = 1.0e3
 
@@ -73,6 +81,10 @@ class MetricContext:
         if self.symmetry_steps < 1:
             raise ValidationError(
                 f"a symmetry test needs at least one step, got {self.symmetry_steps}"
+            )
+        if self.resolution_steps < 1:
+            raise ValidationError(
+                f"a resolution test needs at least one step, got {self.resolution_steps}"
             )
         if not 0.0 < self.distribution_window <= 1.0:
             raise ValidationError(

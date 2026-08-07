@@ -39,6 +39,8 @@ SCENES = (
 
 _DEFAULT_STEPS = 32
 _DEFAULT_SYMMETRY_STEPS = 8
+_DEFAULT_RESOLUTION_STEPS = 4
+"""Shorter again: a refined rollout of a 32 by 32 field works on four times the data."""
 
 
 @dataclass
@@ -99,8 +101,13 @@ class _Scene:
         context = MetricContext(
             invariants=self.system.invariants(self.regime),
             symmetries=self.system.symmetries,
+            refinements=self.system.refinements,
             predictor=predictor,
-            **{"symmetry_steps": min(_DEFAULT_SYMMETRY_STEPS, steps), **settings},
+            **{
+                "symmetry_steps": min(_DEFAULT_SYMMETRY_STEPS, steps),
+                "resolution_steps": min(_DEFAULT_RESOLUTION_STEPS, steps),
+                **settings,
+            },
         )
         return {metric.name: metric.compute(rollout) for metric in build_metrics(metrics, context)}
 

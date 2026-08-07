@@ -70,7 +70,7 @@ and on the held out regime, and report the difference between them as an explici
 | Config | Predictors | Steps | Initial conditions | Evaluation |
 |---|---|---|---|---|
 | `configs/nbody.yaml` | 6 | 255 | 4 per split | 8 s |
-| `configs/fluid.yaml` | 6 | 63 | 4 per split | 37 s |
+| `configs/fluid.yaml` | 6 | 63 | 4 per split | 32 s |
 
 The harness is system agnostic and a test enforces it: nothing under `src/nnphysics/evals`
 may import a system or a model. Metrics read the invariants and symmetries a system
@@ -93,10 +93,11 @@ next to the numbers they produce.
 
 ### The metrics
 
-`one_step_error`, `rollout_error`, `invariant_drift`, `symmetry_violation` and
-`distribution_drift`. Every one of them has a sentinel test asserting both what it catches
-and what it does not, because a metric that flags everything measures nothing. Three
-results worth stating, all asserted in `tests/evals/test_sentinels.py`:
+`one_step_error`, `rollout_error`, `invariant_drift`, `symmetry_violation`,
+`distribution_drift` and `resolution_generalisation`. Every one of them has a sentinel test
+asserting both what it catches and what it does not, because a metric that flags everything
+measures nothing. Three results worth stating, all asserted in
+`tests/evals/test_sentinels.py`:
 
 - The energy injecting predictor is a thousand times more accurate than persistence over
   one step, and `invariant_drift` still rates it a billion times outside the tolerance the
@@ -108,6 +109,16 @@ results worth stating, all asserted in `tests/evals/test_sentinels.py`:
   equivariant under rotation. Only the symmetries it does not commute with reveal it, which
   is why every declared symmetry is tested and the worst is reported.
 
+`resolution_generalisation` is the one metric that does not apply to every system, and it
+says so rather than scoring. It refines the initial condition to a resolution the system
+declares, rolls the predictor forward there, coarsens the result back, and reports both how
+far the predictor drifted from its own answer and how much accuracy that cost. A system
+whose state is not a discretisation of a continuous field declares no refinement and reports
+zero steps tested: there is no finer version of thirty two point masses, and a number there
+would be an invention. `tests/evals/metrics/test_resolution.py` brackets it with a predictor
+written in wavenumbers, which it must not flag, and one written in grid cells, which it must
+catch; the two are separated by four orders of magnitude.
+
 ## Models and training
 
 Train a surrogate and score it against the same suite:
@@ -115,6 +126,7 @@ Train a surrogate and score it against the same suite:
 ```sh
 uv run nnp train --config configs/nbody.yaml
 uv run nnp train --config configs/nbody.yaml --resume
+uv run nnp train --config configs/fluid.yaml
 NNP_MODEL__NAME=mlp NNP_MODEL__HYPERPARAMETERS='{}' uv run nnp train --config configs/nbody.yaml
 ```
 
@@ -130,11 +142,18 @@ passes.
 
 ### The models
 
-| Model | What it is |
-|---|---|
-| `constant` | Persistence with one learned offset per field. The floor. |
-| `mlp` | A network on the flattened state, predicting the normalised update |
-| `graph` | Message passing for the acceleration, velocity Verlet for the time stepping |
+| Model | System | What it is |
+|---|---|---|
+| `constant` | any | Persistence with one learned offset per field. The floor. |
+| `mlp` | any | A network on the flattened state, predicting the normalised update |
+| `graph` | N-body | Message passing for the acceleration, velocity Verlet for the time stepping |
+| `operator` | gridded | Learned multipliers on a truncated band of Fourier modes |
+| `convolution` | gridded | Periodic padded stencils, at the operator's parameter count |
+
+The last two say `gridded` rather than `fluid` because neither names a field. What makes
+them applicable is that the states are two dimensional arrays, which they read from the
+dataset; handed a field of masses, one number per body, they refuse at construction and say
+why. That is the same rule the harness follows one layer up.
 
 The graph network is where the phase's one real design choice lives: **it predicts the
 derivative and lets the symplectic integrator from phase 02 do the time stepping.** A model
@@ -161,7 +180,7 @@ One loop, system agnostic, driven by configuration. Deterministic seeding, gradi
 clipping, a cosine schedule with warmup, early stopping on a validation rollout rather
 than on the training loss, and best and last checkpoints carrying optimiser state.
 
-Two decisions in it earned their place by being wrong first.
+Three decisions in it earned their place by being wrong first.
 
 **Shuffling is a function of the run seed and the epoch number, not of a generator carried
 forward.** Epoch seventeen sees the same order whether it was reached in one run or three,
@@ -178,10 +197,32 @@ times anything else in the batch. Past one standard deviation the loss is linear
 metric stays a plain squared error, because nothing is optimised against it and a number
 that stopped growing once a rollout went wrong is the wrong number to select a model on.
 
+**Early stopping waits for the last curriculum stage, and each stage gets its own
+patience.** Stopping early claims that more training of this kind will not help, and a
+scheduled longer window is not more of the same kind. The fluid operator is where this was
+found and it cost a whole stage: patience of ten against a stage change thirteen epochs
+later ended the run at epoch 27, so the eight step stage never ran. With the rule in place
+the same settings reached it and every one of its epochs beat the best of the four step
+stage. The N-body runs were exposed to the same defect and escaped it only because their
+numbers happened to keep improving.
+
 The rollout curriculum trains on one step, then four, then eight, with gradients truncated
 by the window. It is what makes a surrogate stable over a long horizon, and its absence is
-the usual reason surrogates diverge. It earned its place here: the validation rollout
-improved at every lengthening, 0.1388 on one step, 0.1015 on four, 0.0785 on eight.
+the usual reason surrogates diverge.
+
+What it does is not what the phase 07 numbers alone suggested, and the two systems disagree
+enough to be worth stating. On N-body the validation rollout improved at every lengthening,
+0.1388 on one step, 0.1015 on four, 0.0785 on eight. On the fluid operator the improvement
+comes at the lengthening and is then given back: the four step stage opened at 0.5762, the
+best number the run ever produced, and degraded monotonically to 4.625 over the next twelve
+epochs while its training loss fell the whole way. The eight step stage reset it to 0.66.
+The convolutional network on the same schedule did not do this, improving through both
+longer stages to 0.3103.
+
+So a longer window helps at the moment it is applied and does not keep helping, and how
+long that lasts is a property of the model rather than of the schedule. Selecting on the
+validation rollout is what makes the difference survivable: it picks the epoch the
+lengthening bought and ignores the twelve that followed.
 
 ### What the default N-body run produces
 
@@ -252,6 +293,111 @@ orders of magnitude larger. Round off amplifying in a chaotic 32 body cluster ac
 the gap; a broken symmetry would not explain why the four body held out regime, which is
 far more regular, stays at 2.5e-7.
 
+### What the default fluid run produces
+
+`uv run nnp train --config configs/fluid.yaml` trains the neural operator; the same file
+with `NNP_MODEL__NAME=convolution` trains the control. Both are 2D fields on a 64 by 64
+grid, and their parameter counts are matched deliberately: 149,001 against 148,889, which
+is eight parts in ten thousand. Without that the comparison would be about capacity.
+
+Both splits, 63 steps from four initial conditions. The operator took 1,941 s to train on
+eight cores. The convolutional network took about 5,800 s, roughly three times as much for
+the same number of parameters, because a stencil costs nine multiplies per grid point where
+a one by one convolution costs one. That figure is the sum of its epochs with two excluded:
+the run was interrupted and resumed, and the machine was suspended during those two, so
+their wall clock says nothing about the model.
+
+| Predictor | one step error | horizon at 10% error | error at 63 steps | worst invariant drift |
+|---|---|---|---|---|
+| `reference` | 0 | never exceeded | 0 | 0 |
+| `persistence` | 0.174 | 0.625 | 1.80 | 6.5e7 |
+| `operator` | 0.171 | 0.625 | 937 | 2.3e14 |
+| `convolution` | **0.087** | 0.575 | **0.876** | **1.1e8** |
+
+On the held out shear layer at Reynolds 200:
+
+| Predictor | one step error | error at 63 steps | rollouts completed |
+|---|---|---|---|
+| `persistence` | 0.005 | 0.305 | 4 of 4 |
+| `operator` | 0.147 | 656 | 0 of 4, all diverged by step 28 |
+| `convolution` | **0.013** | 0.942 | 4 of 4 |
+
+**The neural operator loses to the convolutional baseline, and the phase expected it to
+win.** It is beaten on every accuracy number, on every invariant, on equivariance and on
+distributional drift, at a parameter count matched to eight parts in ten thousand and on
+identical training settings. The operator does not clear persistence on one step error at
+all, 0.171 against 0.174, and its rollout diverges: 937 at the end of the test rollout
+where persistence saturates at 1.80, and every held out rollout abandoned by step 28.
+
+**The convolutional network is the first surrogate in this repository to beat persistence
+on both horizon and final error.** Twice as accurate over one step, and a final error of
+0.876 where persistence reaches 1.80, so it is still tracking the flow at the end of the
+rollout rather than merely failing to get worse.
+
+**Its enstrophy is close to right and its energy is not.** The suite reports an enstrophy
+excursion of 28.8 for the convolution against the solver's own 29.0, so the model
+reproduces the viscous decay of enstrophy almost exactly. Energy does not fare as well: an
+excursion of 0.513 against the solver's 0.234, roughly twice as far as the true dynamics
+move. The metric also separates the direction, and it is growth rather than over
+dissipation: the predicted energy stands as much as 0.566 above the true value at some
+point in the rollout and only 0.006 below it. The model adds energy the physics did not
+supply. That is the unphysical growth this phase was told to report rather than hide, and
+it is why the invariant violation reads 1.1e8 for a model whose error curve looks healthy.
+
+**Neither model is fast enough to matter yet.** Measured against the reference solver in
+the same run, the operator takes 0.0091 s per stored interval against 0.0115 and the
+convolution 0.0072 against 0.0094, so both are about a quarter to a third faster. That is
+against a solver taking ten substeps per stored interval, which is where a surrogate's
+speedup is supposed to come from. A model that saves thirty per cent and is less accurate
+has not earned its place, and the honest reading is that a 64 by 64 grid is too small for
+the fixed costs of a network to amortise against a spectral step.
+
+### Resolution generalisation, and what its number means here
+
+This is the one place the operator wins, and it wins by the margin the design predicts.
+
+| Predictor | split | inconsistency | degradation |
+|---|---|---|---|
+| `operator` | test | **0.022** | **-0.0003** |
+| `convolution` | test | 0.636 | 0.233 |
+| `operator` | held out | **0.00024** | **-8.6e-7** |
+| `convolution` | held out | 0.064 | -0.015 |
+| `persistence` | either | 4.4e-16 | 1.1e-16 |
+| `reference` | either | not tested, 0 steps | |
+
+Trained at 64 by 64 and evaluated at 128 by 128, the operator disagrees with itself by two
+per cent over eight steps and running at the finer grid costs it nothing. The convolutional
+network disagrees by 64 per cent, twenty eight times worse, and pays 0.233 of accuracy for
+the change. Its weights are a stencil, and a stencil means a different thing when the
+spacing halves; the operator's weights are indexed by wavenumber and mean the same thing on
+both grids. That is the claim the phase set out to test, and it holds.
+
+Three qualifications, because the number is easy to overread.
+
+**The reference solver cannot be tested at all.** It is constructed for one grid and
+refuses a state of another shape, so the suite records zero steps for it rather than a
+score. That is a fact about the solver worth reading in the table: the resolution
+independence a neural operator claims is not something the thing it imitates has.
+
+**A degradation of zero is not the same as a faithful one.** Ground truth is stored at 64
+by 64, and the two grids genuinely evolve apart: running the exact solver at 128 by 128
+from the refined initial condition and coarsening back differs from the coarse ground truth
+by 0.31 after eight steps on the test split, unchanged at four times the substeps, so it is
+resolution rather than time stepping. A predictor that reproduced the fine scale physics
+would therefore have to score a degradation near that. The operator scores zero because it
+is smooth and inaccurate, and its two paths are about equally wrong. Consistency is the
+number that means what it says; degradation is the number a user feels.
+
+**The held out regime is easier on both.** The shear layer is more regular than decaying
+turbulence, so the coarse and fine grids agree to 3e-5 there rather than 0.31, and both
+models' inconsistencies fall by an order of magnitude. A resolution claim measured only on
+the smooth regime would look far better than it is.
+
+The honest summary of the phase is that the spectral structure bought exactly one thing,
+and it is not accuracy. Without the convolutional control at matched parameter count there
+would have been no way to know that, and without the resolution metric there would have
+been no way to see what was bought instead.
+
 ## Reporting
 
 Render a run, list the history and compare runs:
@@ -272,7 +418,7 @@ record twice gives byte identical output.
 | Config | Evaluation | Rendering | Plots | HTML report |
 |---|---|---|---|---|
 | `configs/nbody.yaml` | 8 s | 5 s | 18 | 1.2 MB |
-| `configs/fluid.yaml` | 34 s | 4 s | 18 | 5.3 MB |
+| `configs/fluid.yaml` | 32 s | 5 s | 20 | 6.1 MB |
 
 Each run gets a directory under `runs/` holding `record.json`, the result file, the states
 kept for the qualitative plot, `plots/`, `report.md` and `report.html`. None of it is
