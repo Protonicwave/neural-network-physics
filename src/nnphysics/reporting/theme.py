@@ -31,6 +31,7 @@ __all__ = [
     "Palette",
     "Typefaces",
     "css_var",
+    "landing_stylesheet",
     "report_stylesheet",
     "token_names",
     "tokens_css",
@@ -216,6 +217,18 @@ def report_stylesheet() -> str:
     return tokens_css() + _SHARED_RULES
 
 
+def landing_stylesheet() -> str:
+    """The whole stylesheet for the landing page.
+
+    Returns:
+        The tokens with the theme button's override, the shared rules, and the rules for
+        the sections only the landing page has, ending in a newline. The shared rules come
+        first and the landing rules override them where a section is treated differently,
+        so that the two artefacts share a definition rather than agreeing by coincidence.
+    """
+    return tokens_css("attribute") + _SHARED_RULES + _LANDING_RULES
+
+
 def _property(name: str) -> str:
     """A token name as a custom property, so `ink_2` becomes `--ink-2`."""
     return f"--{name.replace('_', '-')}"
@@ -297,4 +310,152 @@ figure img {
   border-radius: 8px; padding: 0.75rem;
 }
 figcaption { font-size: 0.86rem; color: var(--muted); padding-top: 0.9rem; max-width: 44rem; }
+"""
+
+# What the landing page has and a report does not: a navigation bar, a hero, sections with
+# a kicker, a register of runs, and a footer. Everything here either introduces one of
+# those or overrides a shared rule the page treats differently, and the override is
+# written next to what it overrides so the reason stays visible.
+_LANDING_RULES = """\
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+a { color: inherit; }
+strong { color: var(--ink); font-weight: 600; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+/* The page reads at a narrower measure than a report, and sets it on the block rather
+   than on the paragraph, so that a list inside a passage lines up with the prose. */
+.prose { max-width: 34rem; }
+.prose p, .prose ul { max-width: none; }
+main { padding-bottom: 0; }
+
+nav {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--plane) 92%, transparent);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--rule);
+}
+nav .wrap { display: flex; align-items: center; gap: 1.25rem; height: 3rem; }
+nav .brand {
+  font-family: var(--mono); font-size: 0.78rem; color: var(--ink); letter-spacing: -0.01em;
+}
+nav .links { display: flex; gap: 1.1rem; margin-left: auto; font-size: 0.8rem; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a:hover { color: var(--ink); }
+nav button {
+  font: inherit; font-size: 0.78rem; color: var(--muted); background: none;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 0.15rem 0.7rem; cursor: pointer;
+}
+@media (max-width: 720px) { nav .links a { display: none; } }
+
+.hero { padding: 5rem 0 3rem; }
+.eyebrow {
+  font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 1.25rem;
+}
+.hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); margin: 0 0 1.25rem; max-width: 22ch; }
+.hero .answer {
+  font-family: var(--serif); font-size: clamp(1.1rem, 2.2vw, 1.35rem);
+  line-height: 1.45; color: var(--ink-2); max-width: 40rem; margin: 0;
+}
+.headline-figs {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5rem;
+  margin: 3.5rem 0 0; padding-top: 2rem; border-top: 1px solid var(--rule);
+}
+.fig-big { font-family: var(--serif); font-size: 2.6rem; line-height: 1; letter-spacing: -0.02em; }
+.fig-big.f-nbody { color: var(--nbody); }
+.fig-big.f-fluid { color: var(--fluid); }
+.fig-big.f-fail { color: var(--fail); }
+.fig-big.f-muted { color: var(--muted); }
+.fig-lead { font-size: 0.95rem; color: var(--ink); margin: 0.6rem 0 0.25rem; font-weight: 500; }
+.fig-note { font-size: 0.84rem; color: var(--muted); margin: 0; max-width: none; }
+@media (max-width: 720px) { .headline-figs { grid-template-columns: 1fr; gap: 1.75rem; } }
+.aside-link {
+  margin-top: 2.5rem; padding: 0.9rem 1.1rem; border: 1px solid var(--rule);
+  border-radius: 8px; background: var(--surface); font-size: 0.9rem; color: var(--ink-2);
+  max-width: none;
+}
+.aside-link a { color: var(--ink); text-underline-offset: 3px; }
+
+section { padding: 4.5rem 0; border-top: 1px solid var(--rule); }
+section > .wrap > .kicker {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 0.9rem;
+}
+/* A section carries its own rule above it, so its heading does not carry a second one. */
+section h2 {
+  font-size: clamp(1.5rem, 3vw, 2rem); margin: 0 0 1rem; max-width: 24ch;
+  border-top: 0; padding-top: 0;
+}
+figure { margin: 2.5rem 0 0; }
+figcaption strong { color: var(--ink-2); font-weight: 600; }
+.chart-card {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 10px; padding: 1.5rem;
+}
+.chart-title { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.2rem; color: var(--ink); }
+.chart-sub { font-size: 0.84rem; color: var(--muted); margin: 0 0 1.25rem; max-width: none; }
+svg { display: block; max-width: 100%; height: auto; }
+.placeholder {
+  border: 1px dashed var(--rule); border-radius: 8px; padding: 3rem 1.5rem;
+  text-align: center; font-size: 0.86rem; color: var(--muted);
+}
+
+/* A report right aligns every column but the first, because every one of its tables is a
+   table of numbers. The page has tables of words, so alignment is asked for by the cell. */
+td:not(:first-child), th:not(:first-child) { text-align: left; font-family: var(--sans); }
+th.n, td.n { text-align: right; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.tag {
+  display: inline-block; font-size: 0.72rem; padding: 0.05rem 0.45rem;
+  border-radius: 3px; border: 1px solid currentColor;
+}
+.t-hidden { color: var(--fail); }
+.t-visible { color: var(--muted); }
+.rank-1 { color: var(--good-ink); font-weight: 600; }
+.rank-3 { color: var(--warn-ink); font-weight: 600; }
+
+.findings { list-style: none; padding: 0; margin: 2rem 0 0; max-width: none; }
+.findings li {
+  padding: 1.1rem 0; border-top: 1px solid var(--rule); margin-bottom: 0;
+  display: grid; grid-template-columns: 12rem 1fr; gap: 1.5rem;
+}
+.findings li:last-child { border-bottom: 1px solid var(--rule); }
+.findings .what { font-weight: 600; font-size: 0.95rem; color: var(--ink); }
+.findings .why { color: var(--ink-2); font-size: 0.92rem; margin: 0; max-width: none; }
+@media (max-width: 720px) { .findings li { grid-template-columns: 1fr; gap: 0.35rem; } }
+
+.runs { margin-top: 2rem; }
+.run {
+  display: grid; grid-template-columns: 1fr 8rem 9rem 6rem; gap: 1.25rem;
+  align-items: baseline; padding: 0.95rem 0.9rem; border-bottom: 1px solid var(--rule);
+  text-decoration: none; border-left: 2px solid transparent; --accent: var(--muted);
+}
+.run:hover { background: var(--surface); border-left-color: var(--accent); }
+.run[data-system="nbody"] { --accent: var(--nbody); }
+.run[data-system="fluid"] { --accent: var(--fluid); }
+.run .name { font-weight: 600; font-size: 0.95rem; color: var(--ink); }
+.run .desc { font-size: 0.82rem; color: var(--muted); }
+.run .cell { font-size: 0.84rem; color: var(--ink-2); }
+.run .cell small {
+  display: block; font-size: 0.72rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.run .rid { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); text-align: right; }
+.status { font-weight: 600; }
+.s-good { color: var(--good-ink); }
+.s-warn { color: var(--warn-ink); }
+.s-fail { color: var(--fail); }
+.s-none { color: var(--muted); }
+@media (max-width: 860px) {
+  .run { grid-template-columns: 1fr 1fr; }
+  .run .rid { text-align: left; }
+}
+
+footer {
+  padding: 3rem 0 5rem; border-top: 1px solid var(--rule);
+  font-size: 0.86rem; color: var(--muted);
+}
+footer p { color: var(--muted); }
+footer code {
+  font-family: var(--mono); font-size: 0.8rem; background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 0.1rem 0.35rem; color: var(--ink-2);
+}
 """

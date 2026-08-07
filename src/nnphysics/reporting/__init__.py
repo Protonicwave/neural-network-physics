@@ -34,6 +34,7 @@ from nnphysics.reporting.explain import (
     metric_summary,
 )
 from nnphysics.reporting.index import KEY_SCALARS, RunSummary, index_runs, summarise
+from nnphysics.reporting.landing import LANDING_NAME, render_landing
 from nnphysics.reporting.layout import (
     HTML_NAME,
     MARKDOWN_NAME,
@@ -89,6 +90,7 @@ from nnphysics.reporting.theme import (
     Palette,
     Typefaces,
     css_var,
+    landing_stylesheet,
     report_stylesheet,
     token_names,
     tokens_css,
@@ -101,6 +103,7 @@ __all__ = [
     "HELD_OUT_SPLIT",
     "HTML_NAME",
     "KEY_SCALARS",
+    "LANDING_NAME",
     "LIGHT",
     "MARKDOWN_NAME",
     "PLOTS_DIR",
@@ -150,6 +153,7 @@ __all__ = [
     "find_records",
     "git_commit",
     "index_runs",
+    "landing_stylesheet",
     "metric_summary",
     "overlay_plot",
     "read_fault_scores",
@@ -157,6 +161,7 @@ __all__ = [
     "render_comparison_html",
     "render_comparison_markdown",
     "render_html",
+    "render_landing",
     "render_markdown",
     "render_plots",
     "report_stylesheet",
