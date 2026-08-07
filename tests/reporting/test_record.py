@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,33 @@ class TestRoundTrip:
         write_record(tmp_path / "two.json", record)
 
         assert (tmp_path / "one.json").read_bytes() == (tmp_path / "two.json").read_bytes()
+
+    def test_a_run_that_diverged_can_still_be_read_back(
+        self, make_record: Factory, tmp_path: Path
+    ) -> None:
+        """A loss that went to infinity is a measurement, not a value to clean up.
+
+        Found by the phase 10 fault suite, whose excessive learning rate produces exactly
+        this. The default serialisation writes a non finite number as `null`, which then
+        refuses to read back as a float, so the run that most needed explaining was the
+        one whose record could not be opened.
+        """
+        diverged = make_record(scale=math.inf)
+
+        write_record(tmp_path / "record.json", diverged)
+        again = read_record(tmp_path / "record.json")
+
+        assert math.isinf(again.evaluation.results[0].scalar("rollout_error", "error.final"))
+
+    def test_a_number_that_is_not_a_number_survives_too(
+        self, make_record: Factory, tmp_path: Path
+    ) -> None:
+        diverged = make_record(scale=math.nan)
+
+        write_record(tmp_path / "record.json", diverged)
+        again = read_record(tmp_path / "record.json")
+
+        assert math.isnan(again.evaluation.results[0].scalar("rollout_error", "error.final"))
 
 
 class TestMigration:

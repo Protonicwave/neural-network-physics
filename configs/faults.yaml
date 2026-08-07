@@ -1,0 +1,96 @@
+# The configuration the fault suite injects into.
+#
+# Deliberately small. The suite trains eight models, one known good and one per fault, and
+# two of the faults change the data and so regenerate a dataset first. At the size of
+# `configs/nbody.yaml` that is hours, and a scored table nobody can afford to reproduce is
+# a scored table nobody will check. Everything here is shrunk except the shape of the
+# pipeline: the same system, the same model, the same curriculum in miniature, the same
+# suite, and a regime held out exactly as the real runs hold one out.
+#
+# What it costs is that the baseline is a weak model. That is stated in the results rather
+# than hidden, and it cuts both ways: a weak baseline makes some faults harder to see
+# against, and it makes none of them easier.
+
+name: faults
+seed: 0
+output_dir: runs
+
+system:
+  name: nbody
+  parameters:
+    gravitational_constant: 1.0
+    softening: 0.01
+
+data:
+  root: data
+  n_trajectories: 16
+  n_steps: 64
+  dt: 0.01
+  # Five rather than the ten the real runs use, so that there is somewhere coarser for the
+  # unstable integrator fault to go and the ground truth is still accurate here.
+  substeps: 5
+  regimes: [cold_collapse, virialised_cluster]
+  held_out_regimes: [hierarchical_pair]
+  val_fraction: 0.2
+  test_fraction: 0.2
+  workers: null
+  shard_trajectories: 16
+  compression_level: 4
+
+model:
+  name: graph
+  hyperparameters:
+    hidden: 32
+    rounds: 1
+
+training:
+  epochs: 12
+  batch_size: 32
+  learning_rate: 0.002
+  weight_decay: 0.0
+  warmup_epochs: 1
+  final_learning_rate_fraction: 0.02
+  gradient_clip: 1.0
+  # No early stopping. Every run of the suite then takes the same number of epochs, so two
+  # records differ because of the fault rather than because one of them stopped sooner.
+  patience: null
+  min_improvement: 0.0
+  # The same three stages the real runs use, so that disabling the curriculum is a change
+  # rather than a relabelling, and the last starts late enough that the interrupted run
+  # has a first half which satisfied its own schedule.
+  curriculum: [1, 4, 8]
+  curriculum_epochs: [0, 3, 6]
+  validation_steps: 8
+  multi_step_weight: 0.5
+  physics_weight: 0.0
+  window_stride: 8
+  loader_workers: 0
+
+ensemble:
+  members: 4
+
+evaluation:
+  name: faults
+  metrics:
+    - one_step_error
+    - rollout_error
+    - invariant_drift
+    - symmetry_violation
+    - distribution_drift
+    - calibration
+  # Four fixtures rather than the full seven. Enough that the suite still produces numbers
+  # the trained model's can be read against, and few enough that eight runs of it are
+  # minutes. `calibrated` is kept because without a predictor that states an uncertainty
+  # the calibration metric scores nothing at all.
+  predictors:
+    - reference
+    - persistence
+    - noise
+    - calibrated
+  rollout_steps: 63
+  n_initial_conditions: 2
+  error_thresholds: [0.01, 0.1, 1.0]
+  symmetry_steps: 8
+  distribution_window: 0.25
+  divergence_factor: 1000.0
+  trust_threshold: 0.1

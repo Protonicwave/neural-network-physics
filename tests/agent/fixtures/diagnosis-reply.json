@@ -1,0 +1,47 @@
+{
+  "id": "msg_01RecordedDiagnosisFixture",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-recorded-1",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": ""
+    },
+    {
+      "type": "text",
+      "text": "The curriculum was reduced to a single step."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01RecordedDiagnosisFixture",
+      "name": "report_diagnosis",
+      "input": {
+        "regressed_metrics": ["rollout_error", "invariant_drift"],
+        "candidates": [
+          {
+            "cause": "rollout_curriculum",
+            "confidence": 0.8,
+            "reasoning": "training.curriculum went from [1, 4, 8] to [1], and the error curve of the candidate rises at every step of the rollout."
+          },
+          {
+            "cause": "learning_rate",
+            "confidence": 0.15,
+            "reasoning": "The final training loss is higher than the baseline's, which a rate that is too high would also produce."
+          },
+          {
+            "cause": "model_capacity",
+            "confidence": 0.05,
+            "reasoning": "Both runs have the same parameter count, so this is unlikely."
+          }
+        ],
+        "next_check": "Retrain the candidate with the baseline's curriculum and see whether the rollout error returns to the baseline's."
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 2431,
+    "output_tokens": 318
+  }
+}

@@ -684,3 +684,100 @@ that counts as an improvement is stated. A metric that produces a scalar nobody 
 explained stops the report rather than printing it bare. Comparison uses those directions:
 it reports an improvement, a regression or no change per scalar, declines to judge the ones
 whose ideal is neither extreme, and flags regressions above a threshold.
+
+## Diagnosing a regression
+
+```sh
+uv run nnp diagnose --baseline <run-id> --candidate <run-id> --context-only
+uv run nnp diagnose --baseline <run-id> --candidate <run-id> --rule-based
+uv run nnp diagnose score --config configs/faults.yaml
+```
+
+`diagnose` reads two run records, reduces them to a summary and asks a model what changed
+and why. It returns the metrics that regressed, a ranked list of candidate causes with a
+confidence for each, and one suggested next check. Nothing it does modifies code, runs
+training or takes any action: it reads and explains.
+
+Building that is easy and the easy part is not the point. **The deliverable here is the
+scored fault injection**, because an agent that produces a fluent explanation of a run
+nobody broke cannot be told apart from one that produces a fluent explanation of anything.
+
+### What is broken, and how
+
+Seven faults, one per cause, injected one at a time into copies of the same known good
+run. What was broken is written down before anything is asked.
+
+| Fault | Cause | Visible in the configuration |
+|---|---|---|
+| `wrong_normalisation` | statistics that do not describe the data | no |
+| `broken_symmetry` | a declared symmetry applied after every step | no |
+| `no_optimiser_state` | resumed from a checkpoint with the moments discarded | no |
+| `high_learning_rate` | two hundred times the configured rate | yes |
+| `wrong_regime` | trained and held out regimes swapped | yes |
+| `no_curriculum` | the rollout curriculum reduced to a single step | yes |
+| `unstable_integrator` | one solver substep per stored interval | yes |
+
+The split is the interesting part. Four are visible in a configuration diff and could be
+named by reading two lines, so they test whether a diagnoser reads the evidence at all.
+The other three appear nowhere in the configuration: the only trace they leave is in the
+numbers.
+
+`configs/faults.yaml` is the same pipeline in miniature, and the whole suite, three
+generated datasets and eight trained models, runs in about seventy seconds. A scored table
+nobody can afford to reproduce is a scored table nobody will check.
+
+### The scores
+
+Both diagnosers choose from the same twelve cause labels, five of which no fault uses.
+Without those five the list would be the answer key. The rule based diagnoser names
+whichever metric regressed most and maps it to the cause that metric is usually about,
+from a table written knowing which faults were coming: it is the strongest trivial
+diagnoser rather than a straw one, and it is what the agent has to beat.
+
+| Diagnoser | top 1 | top 3 | cause named at all | mean rank when named |
+|---|---|---|---|---|
+| agent | **86%** | **100%** | 7 of 7 | 1.29 |
+| rule based | 14% | 43% | 4 of 7 | 2.50 |
+
+The agent beats the baseline, and it is worth being precise about how much of that is
+skill. Four of the seven faults are a configuration diff away, and naming them is reading
+comprehension rather than diagnosis. The result that is not is `wrong_normalisation`,
+where nothing in the configuration differs and the training numbers get an order of
+magnitude *better* while every metric in physical units gets worse; the agent named it
+first, from the observation that one step error rose by the same 32 per cent on position
+and velocity, which is a scale factor rather than a learning failure.
+
+**The one it got wrong is the most interesting row in the table.** On
+`no_optimiser_state` it ranked the true cause third, behind `random_seed` and
+`no_regression`, and its reasoning was that the two loss curves start at the same value,
+end within half a per cent of each other and show no discontinuity where the resume
+happened. That is correct. Losing the Adam moments for five epochs of a twelve epoch run
+of a nine thousand parameter model on this dataset does almost nothing, and the honest
+reading of that row is not that the agent failed to spot the fault but that the fault is
+barely there. A scored suite in which every answer was findable would be measuring the
+suite rather than the diagnoser.
+
+### What the numbers do not say
+
+**The vocabulary is closed.** Choosing from twelve labels is an easier job than writing a
+paragraph, and it is the choice that makes an exact score possible at all. It is a
+simplification, stated rather than buried.
+
+**The runs are small.** The baseline model is weak, which cuts both ways: some faults are
+harder to see against a weak baseline, and none are easier.
+
+**The agent column in `docs/results/diagnosis.md` was not produced by `nnp diagnose
+score`.** No API credential was available on the machine, so each context was given
+separately to a Claude instance with no access to this repository and its answer scored by
+the same code. The document says so at the top and lists what that costs: no token counts,
+so no cost per diagnosis, and the strict tool schema enforced by this package afterwards
+rather than by the API. The ranking is measured honestly; the cost is not measured at all.
+Running the command with a credential replaces that card with one that is.
+
+### One bug it found before the agent was ever asked
+
+The excessive learning rate makes training diverge, and a diverged run's loss is not a
+finite number. Pydantic writes such a number as `null`, which then fails to read back as a
+float, so the run that most needed explaining was the one whose record could not be
+opened. A loss that went to infinity is a measurement rather than a value to clean up, so
+the fix is to serialise it. `tests/reporting/test_record.py` now pins the round trip.

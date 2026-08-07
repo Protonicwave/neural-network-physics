@@ -77,7 +77,10 @@ class RunRecord(BaseModel):
             directory can be moved and still describe itself.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # `constants` rather than the default, so that an embedded number which is not a finite
+    # number survives the round trip instead of being written as `null` and refusing to
+    # read back. A predictor that diverged is the ordinary case for that, not a rare one.
+    model_config = ConfigDict(frozen=True, extra="forbid", ser_json_inf_nan="constants")
 
     schema_version: int = RECORD_SCHEMA_VERSION
     run_id: str = Field(min_length=1)

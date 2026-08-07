@@ -25,19 +25,13 @@ import typer
 
 from nnphysics import __version__
 from nnphysics.cli.evals import summarise_suite
+from nnphysics.cli.pipeline import dataset_normalisation, model_context
 from nnphysics.cli.predictors import CHECKPOINT_DIR, ModelFactory
 from nnphysics.core.config import RunConfig, load_run_config
 from nnphysics.core.errors import NNPhysicsError
 from nnphysics.core.seeding import make_deterministic
-from nnphysics.data.fields import constant_fields
-from nnphysics.data.layout import MANIFEST_NAME, NORMALISATION_NAME, dataset_dir
+from nnphysics.data.layout import MANIFEST_NAME, dataset_dir
 from nnphysics.data.manifest import Manifest, Split, read_manifest
-from nnphysics.data.normalisation import (
-    Normalisation,
-    fit_normalisation,
-    read_normalisation,
-    write_normalisation,
-)
 from nnphysics.evals.result import write_result
 from nnphysics.evals.runner import load_cases, run_suite
 from nnphysics.evals.snapshots import Snapshot, SnapshotSet, capture_snapshots, write_snapshots
@@ -262,29 +256,12 @@ def _capture(  # noqa: PLR0913
 
 def _context(directory: Path, manifest: Manifest, config: RunConfig) -> ModelContext:
     """Everything the model needs to know about the data it will be trained on."""
-    return ModelContext(
-        field_shapes=manifest.field_shapes(Split.TRAIN),
-        static_fields=constant_fields(directory, manifest),
-        normalisation=_normalisation(directory, manifest),
-        dt=manifest.spec.dt,
-        seed=config.run_seed,
+    return model_context(
+        directory,
+        manifest,
+        config,
+        dataset_normalisation(directory, manifest, echo=typer.echo),
     )
-
-
-def _normalisation(directory: Path, manifest: Manifest) -> Normalisation:
-    """The training split's statistics, fitted now if `nnp data stats` never was.
-
-    Fitting here rather than failing keeps the pipeline to one command, and it cannot
-    reach the wrong data: the fit reads the training split whichever path it is reached
-    by, and the artefact it writes is the one `nnp data stats` would have written.
-    """
-    path = directory / NORMALISATION_NAME
-    if path.is_file():
-        return read_normalisation(path)
-    typer.echo(f"No {NORMALISATION_NAME} beside the data, fitting it from the training split.")
-    statistics = fit_normalisation(directory, manifest)
-    write_normalisation(path, statistics)
-    return statistics
 
 
 def _resolve(config: Path) -> RunConfig:

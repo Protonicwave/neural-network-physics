@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BENCHMARK_NAME",
     "ENSEMBLE_LABEL",
+    "FAULT_LABEL",
     "HISTORY_NAME",
     "HTML_NAME",
     "MARKDOWN_NAME",
@@ -31,6 +32,7 @@ __all__ = [
     "SNAPSHOTS_NAME",
     "RunPaths",
     "ensemble_paths",
+    "fault_paths",
     "find_record",
     "find_records",
     "result_name",
@@ -63,6 +65,11 @@ benchmark can be read without parsing a run."""
 ENSEMBLE_LABEL = "ensemble"
 """Marks the directory a deep ensemble writes to, so it cannot land on top of the
 directory of the member that happens to share its configuration."""
+
+FAULT_LABEL = "fault"
+"""Marks a directory the fault suite writes to. Fault runs are derived rather than asked
+for, and a runs root that mixed them in with real runs would report a deliberately broken
+model in the history as though someone had meant it."""
 
 
 def result_name(suite: str) -> str:
@@ -185,6 +192,30 @@ def ensemble_paths(config: RunConfig) -> RunPaths:
     """
     base = config.for_member(0)
     return RunPaths(base.output_dir / f"{base.name}-{ENSEMBLE_LABEL}-{base.run_id}")
+
+
+def fault_paths(config: RunConfig, label: str) -> RunPaths:
+    """Where one run of the fault suite writes its artefacts.
+
+    Labelled as well as hashed, for the same reason an ensemble is. Two of the injected
+    faults change nothing in the configuration, so they hash to the identifier of the
+    known good run they were injected into, and without a label of their own they would
+    each overwrite the baseline they are supposed to be compared against.
+
+    Args:
+        config: The resolved configuration of that run, faulty or not.
+        label: What to call it, normally the fault name.
+
+    Returns:
+        The paths, which may not exist yet.
+
+    Raises:
+        ValidationError: If the label is empty, which would put the run back on top of
+            the directory the plain run uses.
+    """
+    if not label:
+        raise ValidationError("a fault run needs a label to keep it off the plain run's directory")
+    return RunPaths(config.output_dir / f"{config.name}-{FAULT_LABEL}-{label}-{config.run_id}")
 
 
 def find_records(root: Path) -> tuple[Path, ...]:
