@@ -171,8 +171,11 @@ def to_html(document: Document, resolve: Callable[[str], str] | None = None) -> 
         f"<style>\n{_CSS}</style>\n"
         "</head>\n"
         "<body>\n"
+        '<header class="masthead"><div class="wrap">nnphysics</div></header>\n'
+        '<main class="wrap">\n'
         f"<h1>{html.escape(document.title)}</h1>\n"
         f"{body}\n"
+        "</main>\n"
         "</body>\n"
         "</html>\n"
     )
@@ -249,27 +252,81 @@ def _html_table(table: Table) -> str:
 
 
 _CSS = """\
-:root { color-scheme: light dark; }
+:root {
+  color-scheme: light dark;
+  --plane: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --rule: rgba(11, 11, 11, 0.10);
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: ui-sans-serif, system-ui, "Segoe UI", Inter, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --plane: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --rule: rgba(255, 255, 255, 0.10);
+  }
+}
+* { box-sizing: border-box; }
 body {
-  margin: 0 auto; padding: 2rem 1.5rem; max-width: 60rem;
-  font-family: system-ui, sans-serif; line-height: 1.5;
+  margin: 0; background: var(--plane); color: var(--ink);
+  font-family: var(--sans); font-size: 16px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
-h1, h2, h3 { line-height: 1.25; }
+.wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.5rem; }
+.masthead {
+  border-bottom: 1px solid var(--rule); margin-bottom: 3.5rem;
+  font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
+}
+.masthead .wrap { padding-top: 0.9rem; padding-bottom: 0.9rem; }
+main { padding-bottom: 6rem; }
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--serif); font-weight: 600; line-height: 1.2;
+  letter-spacing: -0.01em; color: var(--ink);
+}
+h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); margin: 0 0 1.5rem; max-width: 24ch; }
 h2 {
-  margin-top: 2.5rem; padding-bottom: 0.2rem;
-  border-bottom: 1px solid rgba(127, 127, 127, 0.35);
+  font-size: clamp(1.3rem, 2.6vw, 1.6rem); margin: 3.5rem 0 1rem;
+  padding-top: 1.75rem; border-top: 1px solid var(--rule);
 }
-table { border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; width: 100%; }
-caption { text-align: left; padding-bottom: 0.4rem; font-style: italic; }
-th, td {
-  border-bottom: 1px solid rgba(127, 127, 127, 0.35);
-  padding: 0.3rem 0.6rem; text-align: left;
+h3 { font-size: 1.1rem; margin: 2.25rem 0 0.6rem; }
+p, li { color: var(--ink-2); }
+p { max-width: 38rem; }
+ul { max-width: 38rem; padding-left: 1.1rem; }
+li { margin-bottom: 0.3rem; }
+code { font-family: var(--mono); font-size: 0.86em; }
+table {
+  border-collapse: collapse; width: 100%; margin: 1.75rem 0;
+  font-size: 0.88rem; display: block; overflow-x: auto;
 }
-th { font-weight: 600; }
+caption {
+  text-align: left; padding-bottom: 0.6rem;
+  font-size: 0.86rem; color: var(--muted);
+}
+th, td { border-bottom: 1px solid var(--rule); padding: 0.55rem 0.8rem; text-align: left; }
+th {
+  font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted); white-space: nowrap;
+}
+td { color: var(--ink-2); }
+td:first-child { color: var(--ink); }
 td:not(:first-child), th:not(:first-child) {
-  text-align: right; font-variant-numeric: tabular-nums;
+  text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono);
 }
-figure { margin: 1.5rem 0; }
-img { max-width: 100%; height: auto; }
-figcaption { font-size: 0.9rem; font-style: italic; padding-top: 0.4rem; }
+th:not(:first-child) { font-family: var(--sans); }
+tbody tr:hover { background: var(--surface); }
+figure { margin: 2rem 0; }
+figure img {
+  display: block; width: 100%; height: auto;
+  background: #ffffff; border: 1px solid var(--rule);
+  border-radius: 8px; padding: 0.75rem;
+}
+figcaption { font-size: 0.86rem; color: var(--muted); padding-top: 0.9rem; max-width: 44rem; }
 """
