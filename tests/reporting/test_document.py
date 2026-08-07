@@ -13,6 +13,7 @@ from nnphysics.reporting.document import (
     to_html,
     to_markdown,
 )
+from nnphysics.reporting.theme import report_stylesheet
 
 TABLE = Table(
     headers=("predictor", "error"),
@@ -100,9 +101,10 @@ class TestHtml:
         assert "plots/a.png" not in text
 
     def test_the_style_travels_with_the_document(self) -> None:
+        """The one stylesheet, inline, so the file needs nothing beside it."""
         text = to_html(Document("t"))
 
-        assert "<style>" in text
+        assert f"<style>\n{report_stylesheet()}</style>" in text
         assert "<link" not in text
 
     def test_the_same_document_renders_identically_twice(self) -> None:

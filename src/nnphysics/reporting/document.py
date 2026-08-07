@@ -16,6 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from nnphysics.core.errors import ValidationError
+from nnphysics.reporting.theme import report_stylesheet
 
 __all__ = [
     "Block",
@@ -168,11 +169,14 @@ def to_html(document: Document, resolve: Callable[[str], str] | None = None) -> 
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{html.escape(document.title)}</title>\n"
-        f"<style>\n{_CSS}</style>\n"
+        f"<style>\n{report_stylesheet()}</style>\n"
         "</head>\n"
         "<body>\n"
+        '<header class="masthead"><div class="wrap">nnphysics</div></header>\n'
+        '<main class="wrap">\n'
         f"<h1>{html.escape(document.title)}</h1>\n"
         f"{body}\n"
+        "</main>\n"
         "</body>\n"
         "</html>\n"
     )
@@ -246,30 +250,3 @@ def _html_table(table: Table) -> str:
         for row in table.rows
     )
     return f"<table>{caption}<thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
-
-
-_CSS = """\
-:root { color-scheme: light dark; }
-body {
-  margin: 0 auto; padding: 2rem 1.5rem; max-width: 60rem;
-  font-family: system-ui, sans-serif; line-height: 1.5;
-}
-h1, h2, h3 { line-height: 1.25; }
-h2 {
-  margin-top: 2.5rem; padding-bottom: 0.2rem;
-  border-bottom: 1px solid rgba(127, 127, 127, 0.35);
-}
-table { border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; width: 100%; }
-caption { text-align: left; padding-bottom: 0.4rem; font-style: italic; }
-th, td {
-  border-bottom: 1px solid rgba(127, 127, 127, 0.35);
-  padding: 0.3rem 0.6rem; text-align: left;
-}
-th { font-weight: 600; }
-td:not(:first-child), th:not(:first-child) {
-  text-align: right; font-variant-numeric: tabular-nums;
-}
-figure { margin: 1.5rem 0; }
-img { max-width: 100%; height: auto; }
-figcaption { font-size: 0.9rem; font-style: italic; padding-top: 0.4rem; }
-"""
