@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Can a neural network replace a physics simulator?</title>
+<style>
+:root {
+  --plane: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --rule: rgba(11, 11, 11, 0.10);
+  --nbody: #4a3aa7;
+  --nbody-soft: #b6aee0;
+  --fluid: #1baf7a;
+  --fluid-soft: #a9e0c9;
+  --fail: #d03b3b;
+  --warn-ink: #8a6100;
+  --good-ink: #006300;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: ui-sans-serif, system-ui, "Segoe UI", Inter, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+:root[data-theme="dark"] {
+  --plane: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --rule: rgba(255, 255, 255, 0.10);
+  --nbody: #9085e9;
+  --nbody-soft: #4b448c;
+  --fluid: #199e70;
+  --fluid-soft: #175c45;
+  --fail: #e66767;
+  --warn-ink: #d9a341;
+  --good-ink: #0ca30c;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--plane); color: var(--ink);
+  font-family: var(--sans); font-size: 16px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.5rem; }
+.prose { max-width: 34rem; }
+p { color: var(--ink-2); }
+a { color: inherit; }
+h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; color: var(--ink); }
+strong { color: var(--ink); font-weight: 600; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Nav */
+nav {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--plane) 92%, transparent);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--rule);
+}
+nav .wrap { display: flex; align-items: center; gap: 1.25rem; height: 3rem; }
+nav .brand { font-family: var(--mono); font-size: 0.78rem; color: var(--ink); letter-spacing: -0.01em; }
+nav .links { display: flex; gap: 1.1rem; margin-left: auto; font-size: 0.8rem; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a:hover { color: var(--ink); }
+nav button {
+  font: inherit; font-size: 0.78rem; color: var(--muted); background: none;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 0.15rem 0.7rem; cursor: pointer;
+}
+@media (max-width: 720px) { nav .links a { display: none; } }
+
+/* Hero */
+.hero { padding: 5rem 0 3rem; }
+.eyebrow {
+  font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 1.25rem;
+}
+.hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); margin: 0 0 1.25rem; max-width: 22ch; }
+.hero .answer {
+  font-family: var(--serif); font-size: clamp(1.1rem, 2.2vw, 1.35rem);
+  line-height: 1.45; color: var(--ink-2); max-width: 40rem; margin: 0;
+}
+.hero .answer b { color: var(--ink); font-weight: 600; }
+
+.headline-figs {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5rem;
+  margin: 3.5rem 0 0; padding-top: 2rem; border-top: 1px solid var(--rule);
+}
+.fig-big { font-family: var(--serif); font-size: 2.6rem; line-height: 1; letter-spacing: -0.02em; }
+.fig-big.f-nbody { color: var(--nbody); }
+.fig-big.f-fluid { color: var(--fluid); }
+.fig-big.f-fail { color: var(--fail); }
+.fig-lead { font-size: 0.95rem; color: var(--ink); margin: 0.6rem 0 0.25rem; font-weight: 500; }
+.fig-note { font-size: 0.84rem; color: var(--muted); margin: 0; }
+@media (max-width: 720px) { .headline-figs { grid-template-columns: 1fr; gap: 1.75rem; } }
+
+.aside-link {
+  margin-top: 2.5rem; padding: 0.9rem 1.1rem; border: 1px solid var(--rule);
+  border-radius: 8px; background: var(--surface); font-size: 0.9rem; color: var(--ink-2);
+}
+.aside-link a { color: var(--ink); text-underline-offset: 3px; }
+
+/* Sections */
+section { padding: 4.5rem 0; border-top: 1px solid var(--rule); }
+section > .wrap > .kicker {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 0.9rem;
+}
+section h2 { font-size: clamp(1.5rem, 3vw, 2rem); margin: 0 0 1rem; max-width: 24ch; }
+
+/* Figures */
+figure { margin: 2.5rem 0 0; }
+figcaption { font-size: 0.86rem; color: var(--muted); margin-top: 0.9rem; max-width: 44rem; }
+figcaption b { color: var(--ink-2); font-weight: 600; }
+.chart-card {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 10px; padding: 1.5rem;
+}
+.chart-title { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.2rem; }
+.chart-sub { font-size: 0.84rem; color: var(--muted); margin: 0 0 1.25rem; }
+svg { display: block; max-width: 100%; height: auto; }
+.legend { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--ink-2); margin-bottom: 1rem; }
+.legend span { display: inline-flex; align-items: center; gap: 0.45rem; }
+.swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+
+/* Controls */
+.controls { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; margin-bottom: 1.25rem; }
+.ctrl-group { display: flex; align-items: center; gap: 0.4rem; }
+.ctrl-label { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
+.seg button {
+  font: inherit; font-size: 0.82rem; color: var(--ink-2); background: transparent;
+  border: 0; padding: 0.28rem 0.8rem; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--plane); }
+
+/* Drift viewer */
+.plate {
+  background: #ffffff; border-radius: 8px; padding: 0.75rem;
+  border: 1px solid var(--rule);
+}
+.plate img { display: block; width: 100%; height: auto; }
+.strip-note {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem;
+  margin-top: 1.25rem; font-size: 0.88rem;
+}
+.strip-note div { color: var(--ink-2); }
+.strip-note .h { font-weight: 600; color: var(--ink); display: block; margin-bottom: 0.15rem; }
+@media (max-width: 720px) { .strip-note { grid-template-columns: 1fr; gap: 0.9rem; } }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; margin-top: 1.5rem; }
+th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--rule); }
+th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+th.n { text-align: right; }
+tbody tr:hover { background: var(--surface); }
+.tag {
+  display: inline-block; font-size: 0.72rem; padding: 0.05rem 0.45rem;
+  border-radius: 3px; border: 1px solid currentColor;
+}
+.t-hidden { color: var(--fail); }
+.t-visible { color: var(--muted); }
+.rank-1 { color: var(--good-ink); font-weight: 600; }
+.rank-3 { color: var(--warn-ink); font-weight: 600; }
+
+/* Findings list */
+.findings { list-style: none; padding: 0; margin: 2rem 0 0; }
+.findings li {
+  padding: 1.1rem 0; border-top: 1px solid var(--rule);
+  display: grid; grid-template-columns: 12rem 1fr; gap: 1.5rem;
+}
+.findings li:last-child { border-bottom: 1px solid var(--rule); }
+.findings .what { font-weight: 600; font-size: 0.95rem; }
+.findings .why { color: var(--ink-2); font-size: 0.92rem; margin: 0; }
+@media (max-width: 720px) { .findings li { grid-template-columns: 1fr; gap: 0.35rem; } }
+
+/* Run register */
+.runs { margin-top: 2rem; }
+.run {
+  display: grid; grid-template-columns: 1fr 8rem 9rem 6rem; gap: 1.25rem;
+  align-items: baseline; padding: 0.95rem 0.9rem; border-bottom: 1px solid var(--rule);
+  text-decoration: none; border-left: 2px solid transparent;
+}
+.run:hover { background: var(--surface); border-left-color: var(--accent); }
+.run[data-system="nbody"] { --accent: var(--nbody); }
+.run[data-system="fluid"] { --accent: var(--fluid); }
+.run .name { font-weight: 600; font-size: 0.95rem; }
+.run .desc { font-size: 0.82rem; color: var(--muted); }
+.run .cell { font-size: 0.84rem; color: var(--ink-2); }
+.run .cell small { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.run .rid { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); text-align: right; }
+.status { font-weight: 600; }
+.s-fail { color: var(--fail); }
+.s-warn { color: var(--warn-ink); }
+.s-none { color: var(--muted); }
+@media (max-width: 860px) {
+  .run { grid-template-columns: 1fr 1fr; }
+  .run .rid { text-align: left; }
+}
+
+footer { padding: 3rem 0 5rem; border-top: 1px solid var(--rule); font-size: 0.86rem; color: var(--muted); }
+footer code {
+  font-family: var(--mono); font-size: 0.8rem; background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 0.1rem 0.35rem; color: var(--ink-2);
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="brand">nnphysics</span>
+    <span class="links">
+      <a href="#drift">The drift</a>
+      <a href="#trust">Trust</a>
+      <a href="#cost">Cost</a>
+      <a href="#diagnosis">Diagnosis</a>
+      <a href="#runs">Runs</a>
+    </span>
+    <button id="theme">dark</button>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Neural surrogates and an evaluation harness</p>
+    <h1>Can a neural network replace a physics simulator?</h1>
+    <p class="answer">
+      On two systems, gravitational N-body and 2D fluid flow, the answer measured here is
+      <b>not yet</b>. The interesting part is not that the networks failed. It is that
+      the harness says precisely where, when and by how much, and it was built to catch
+      itself being wrong.
+    </p>
+
+    <div class="headline-figs">
+      <div>
+        <div class="fig-big f-fluid">11 of 63</div>
+        <p class="fig-lead">Steps the best surrogate stays usable</p>
+        <p class="fig-note">After that the error is larger than the signal it is predicting.</p>
+      </div>
+      <div>
+        <div class="fig-big f-fail">0 of 4</div>
+        <p class="fig-lead">Rollouts that survive an unseen setup</p>
+        <p class="fig-note">Shown a configuration it never trained on, the N-body model blows up every time.</p>
+      </div>
+      <div>
+        <div class="fig-big f-nbody">17&times; slower</div>
+        <p class="fig-lead">Than the simulator it was meant to replace</p>
+        <p class="fig-note">Compared at equal accuracy, which is the only comparison that means anything.</p>
+      </div>
+    </div>
+
+    <p class="aside-link">
+      The project also ships an AI agent that diagnoses failed training runs. Given seven
+      deliberately sabotaged runs it named the true cause first in six of them, against
+      one of seven for a strong conventional baseline.
+      <a href="#diagnosis">See the scoring</a>.
+    </p>
+  </div>
+</header>
+
+<!-- ============ PREMISE ============ -->
+<section id="why">
+  <div class="wrap">
+    <p class="kicker">The idea</p>
+    <h2>Fast, or right. The question is how long you get both.</h2>
+    <div class="prose">
+      <p>
+        A physics simulator takes the current state of the world and steps it forward, over
+        and over, following rules we know are correct. It is trustworthy and it is slow.
+      </p>
+      <p>
+        A neural network can learn to take the same step in a fraction of the time. But it
+        is an approximation, and each step is fed its own previous answer. Small errors
+        compound. The prediction tracks reality, then drifts, then stops meaning anything.
+      </p>
+      <p>
+        <strong>So the useful question is never "is it accurate".</strong> It is: how far
+        can you run before it is not, does it warn you, and is it actually cheaper than
+        just running the simulator. This project measures all three.
+      </p>
+    </div>
+
+    <figure>
+      <div class="chart-card">
+        <p class="chart-title">How a surrogate fails</p>
+        <p class="chart-sub">Prediction error against simulated time, in schematic form.</p>
+        <svg viewBox="0 0 720 260" role="img" aria-label="Schematic showing surrogate error growing away from the simulator's flat line, crossing a usable threshold early in the rollout.">
+          <defs>
+            <linearGradient id="trustfade" x1="0" x2="1">
+              <stop offset="0%" stop-color="var(--fluid)" stop-opacity="0.16"/>
+              <stop offset="100%" stop-color="var(--fluid)" stop-opacity="0.02"/>
+            </linearGradient>
+          </defs>
+          <rect x="60" y="30" width="105" height="170" fill="url(#trustfade)"/>
+          <line x1="60" y1="200" x2="690" y2="200" stroke="var(--axis)" stroke-width="1"/>
+          <line x1="60" y1="30" x2="60" y2="200" stroke="var(--axis)" stroke-width="1"/>
+          <line x1="60" y1="150" x2="690" y2="150" stroke="var(--fail)" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.75"/>
+          <text x="686" y="142" text-anchor="end" font-size="12" fill="var(--fail)">error as large as the signal</text>
+          <path d="M60 199 H690" stroke="var(--muted)" stroke-width="2" fill="none"/>
+          <text x="200" y="192" font-size="12" fill="var(--muted)">simulator, correct by construction</text>
+          <path d="M60 199 C 130 196, 168 172, 200 150 S 300 74, 420 48 S 600 38, 690 36"
+                stroke="var(--fluid)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+          <text x="300" y="105" font-size="12" fill="var(--fluid)" font-weight="600">surrogate</text>
+          <circle cx="200" cy="150" r="5" fill="var(--surface)" stroke="var(--fail)" stroke-width="2.5"/>
+          <text x="112" y="222" text-anchor="middle" font-size="12" fill="var(--ink-2)">usable</text>
+          <text x="430" y="222" text-anchor="middle" font-size="12" fill="var(--muted)">not usable, but still producing numbers</text>
+          <text x="375" y="248" text-anchor="middle" font-size="12" fill="var(--muted)">simulated time</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>The danger is the right-hand side.</b> A surrogate does not stop or throw an error
+        when it stops being right. It keeps returning confident, plausible, wrong states. Every
+        metric in this project exists to find the crossing point.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ DRIFT ============ -->
+<section id="drift">
+  <div class="wrap">
+    <p class="kicker">The evidence</p>
+    <h2>Watch it drift</h2>
+    <div class="prose">
+      <p>
+        Both rows below start from the same state. The top row is the real simulation. The
+        bottom row is the neural network's prediction, fed only its own previous output.
+        Time runs left to right.
+      </p>
+    </div>
+
+    <figure>
+      <div class="chart-card">
+        <div class="controls">
+          <div class="ctrl-group">
+            <span class="ctrl-label">System</span>
+            <span class="seg">
+              <button data-sys="fluid" aria-pressed="true">Fluid</button>
+              <button data-sys="nbody" aria-pressed="false">N-body</button>
+            </span>
+          </div>
+          <div class="ctrl-group">
+            <span class="ctrl-label">Predictor</span>
+            <span class="seg" id="model-seg"></span>
+          </div>
+          <div class="ctrl-group">
+            <span class="ctrl-label">Setup</span>
+            <span class="seg">
+              <button data-split="test" aria-pressed="true">Trained on</button>
+              <button data-split="held_out" aria-pressed="false">Never seen</button>
+            </span>
+          </div>
+        </div>
+
+        <div class="plate"><img id="strip" src="" alt=""></div>
+
+        <div class="strip-note">
+          <div><span class="h">What you are looking at</span><span id="note-what"></span></div>
+          <div><span class="h">What it means</span><span id="note-mean"></span></div>
+        </div>
+      </div>
+      <figcaption>
+        <b>Try "Never seen".</b> That setup is a configuration held back from training
+        entirely: a shear layer for the fluid, a pair of tight binaries for N-body. It is the
+        honest test, because in real use a surrogate meets conditions nobody trained it on.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ TRUST ============ -->
+<section id="trust">
+  <div class="wrap">
+    <p class="kicker">How far you get</p>
+    <h2>Usable for a fraction of the rollout</h2>
+    <div class="prose">
+      <p>
+        A rollout is counted as usable while the prediction error stays below a tenth of the
+        size of the state itself. Past that the mistake is comparable to the thing being
+        predicted. Each bar is the length of that usable stretch, drawn against the full
+        rollout the model was asked for.
+      </p>
+    </div>
+
+    <figure>
+      <div class="chart-card">
+        <p class="chart-title">Usable steps out of the full rollout</p>
+        <p class="chart-sub">Higher is better. Grey track is the length of the rollout requested.</p>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--nbody)"></i>N-body, trained-on setup</span>
+          <span><i class="swatch" style="background:var(--nbody-soft)"></i>N-body, unseen setup</span>
+          <span><i class="swatch" style="background:var(--fluid)"></i>Fluid, trained-on setup</span>
+          <span><i class="swatch" style="background:var(--fluid-soft)"></i>Fluid, unseen setup</span>
+        </div>
+
+        <svg viewBox="0 0 720 340" role="img" aria-label="Bar chart of usable steps. N-body models reach at most 3.75 of 255 steps; fluid models reach at most 12.5 of 63 steps.">
+          <!-- N-body panel -->
+          <text x="0" y="14" font-size="12" font-weight="600" fill="var(--ink)">Gravitational N-body</text>
+          <text x="720" y="14" text-anchor="end" font-size="11" fill="var(--muted)">rollout of 255 steps</text>
+
+          <g font-size="12" fill="var(--ink-2)">
+            <text x="0" y="44">Graph network</text>
+            <text x="0" y="76">Perceptron</text>
+            <text x="0" y="108">Repeat last state</text>
+          </g>
+          <g>
+            <rect x="150" y="32" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="32" width="7.4" height="7" rx="2" fill="var(--nbody)"/>
+            <rect x="150" y="43" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="43" width="2" height="7" rx="1" fill="var(--nbody-soft)"/>
+            <text x="664" y="44" font-size="11" class="num" fill="var(--ink-2)">3.8 / 1.0</text>
+
+            <rect x="150" y="64" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="64" width="2.5" height="7" rx="2" fill="var(--nbody)"/>
+            <rect x="150" y="75" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <text x="664" y="76" font-size="11" class="num" fill="var(--ink-2)">1.3 / none</text>
+
+            <rect x="150" y="96" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="96" width="2.5" height="7" rx="2" fill="var(--muted)"/>
+            <rect x="150" y="107" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="107" width="6" height="7" rx="2" fill="var(--muted)"/>
+            <text x="664" y="108" font-size="11" class="num" fill="var(--ink-2)">1.3 / 3.0</text>
+          </g>
+          <text x="150" y="134" font-size="11" fill="var(--muted)">The perceptron cannot run on the unseen setup at all: it is wired to a fixed number of bodies.</text>
+
+          <!-- Fluid panel -->
+          <text x="0" y="196" font-size="12" font-weight="600" fill="var(--ink)">2D fluid flow</text>
+          <text x="720" y="196" text-anchor="end" font-size="11" fill="var(--muted)">rollout of 63 steps</text>
+
+          <g font-size="12" fill="var(--ink-2)">
+            <text x="0" y="226">Convolutional</text>
+            <text x="0" y="258">Neural operator</text>
+            <text x="0" y="290">Repeat last state</text>
+          </g>
+          <g>
+            <rect x="150" y="214" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="214" width="91.3" height="7" rx="2" fill="var(--fluid)"/>
+            <rect x="150" y="225" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="225" width="63.5" height="7" rx="2" fill="var(--fluid-soft)"/>
+            <text x="664" y="226" font-size="11" class="num" fill="var(--ink-2)">11.5 / 8.0</text>
+
+            <rect x="150" y="246" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="246" width="99.2" height="7" rx="2" fill="var(--fluid)"/>
+            <rect x="150" y="257" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="257" width="7.9" height="7" rx="2" fill="var(--fluid-soft)"/>
+            <text x="664" y="258" font-size="11" class="num" fill="var(--ink-2)">12.5 / 1.0</text>
+
+            <rect x="150" y="278" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="278" width="99.2" height="7" rx="2" fill="var(--muted)"/>
+            <rect x="150" y="289" width="500" height="7" rx="2" fill="var(--grid)"/>
+            <rect x="150" y="289" width="182.5" height="7" rx="2" fill="var(--muted)"/>
+            <text x="664" y="290" font-size="11" class="num" fill="var(--ink-2)">12.5 / 23.0</text>
+          </g>
+          <text x="150" y="318" font-size="11" fill="var(--muted)">"Repeat last state" is the free baseline: predict no change at all. Anything below it is not worth training.</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>Read the grey bars first.</b> Doing nothing at all, just returning the previous
+        state, matches or beats every neural network here on the unseen setups, and matches the
+        neural operator even on the trained-on one. A surrogate that cannot clear that line has
+        not earned its training cost.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ COST ============ -->
+<section id="cost">
+  <div class="wrap">
+    <p class="kicker">The comparison that matters</p>
+    <h2>Is it even faster?</h2>
+    <div class="prose">
+      <p>
+        The point of a surrogate is speed, so it has to be timed against a simulator turned
+        down to the same accuracy, not against the simulator at its most careful setting.
+        The simulator has a quality dial. Turning it down is free and it is the real competition.
+      </p>
+    </div>
+
+    <figure>
+      <div class="chart-card">
+        <p class="chart-title">Accuracy against time per step, gravitational N-body</p>
+        <p class="chart-sub">Down and to the left is better: more accurate, less time. One CPU thread, 15 timed trials.</p>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--muted)"></i>Simulator, quality dial from low to high</span>
+          <span><i class="swatch" style="background:var(--nbody)"></i>Neural surrogate</span>
+        </div>
+
+        <svg viewBox="0 0 720 400" role="img" aria-label="Scatter of error against milliseconds per step. The simulator's four settings form a curve well to the left of both neural surrogates, which sit at higher cost and no better accuracy.">
+          <!-- gridlines -->
+          <g stroke="var(--grid)" stroke-width="1">
+            <line x1="60" y1="350" x2="690" y2="350"/>
+            <line x1="60" y1="253" x2="690" y2="253"/>
+            <line x1="60" y1="156" x2="690" y2="156"/>
+            <line x1="60" y1="59" x2="690" y2="59"/>
+          </g>
+          <g font-size="11" fill="var(--muted)" text-anchor="end">
+            <text x="50" y="354">0</text>
+            <text x="50" y="257">0.5</text>
+            <text x="50" y="160">1.0</text>
+            <text x="50" y="63">1.5</text>
+          </g>
+          <text x="18" y="205" font-size="11" fill="var(--muted)" text-anchor="middle" transform="rotate(-90 18 205)">worst error over the rollout</text>
+
+          <line x1="60" y1="350" x2="690" y2="350" stroke="var(--axis)" stroke-width="1"/>
+          <g font-size="11" fill="var(--muted)" text-anchor="middle">
+            <text x="140" y="372">0.1</text>
+            <text x="325" y="372">0.5</text>
+            <text x="404" y="372">1</text>
+            <text x="589" y="372">5</text>
+            <text x="669" y="372">10</text>
+            <text x="375" y="392">milliseconds per step, log scale</text>
+          </g>
+
+          <!-- matched-accuracy connector -->
+          <line x1="177" y1="106" x2="504" y2="54" stroke="var(--fail)" stroke-width="1.5" stroke-dasharray="5 4"/>
+          <text x="330" y="92" font-size="11.5" fill="var(--fail)" text-anchor="middle" font-weight="600">same accuracy, 17&times; the time</text>
+
+          <!-- simulator ladder -->
+          <path d="M103 40 L177 106 L333 115 L422 350" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linejoin="round"/>
+          <g fill="var(--muted)">
+            <circle cx="103" cy="40" r="5" stroke="var(--surface)" stroke-width="2"/>
+            <circle cx="177" cy="106" r="5" stroke="var(--surface)" stroke-width="2"/>
+            <circle cx="333" cy="115" r="5" stroke="var(--surface)" stroke-width="2"/>
+            <circle cx="422" cy="350" r="5" stroke="var(--surface)" stroke-width="2"/>
+          </g>
+          <text x="103" y="28" font-size="11" fill="var(--muted)" text-anchor="middle">lowest quality</text>
+          <text x="430" y="338" font-size="11" fill="var(--muted)">exact, the reference</text>
+
+          <!-- surrogates -->
+          <g fill="var(--nbody)">
+            <circle cx="504" cy="54" r="6" stroke="var(--surface)" stroke-width="2"/>
+            <circle cx="657" cy="109" r="6" stroke="var(--surface)" stroke-width="2"/>
+          </g>
+          <text x="504" y="40" font-size="11.5" fill="var(--nbody)" text-anchor="middle" font-weight="600">graph network</text>
+          <text x="657" y="130" font-size="11.5" fill="var(--nbody)" text-anchor="middle" font-weight="600">ensemble of four</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>Both surrogates sit above and to the right of the simulator's curve</b>, which is the
+        losing quadrant: slower and no more accurate. The graph network takes 2.4 ms per step
+        where the simulator reaches the same accuracy in 0.14 ms. Counting the training time as
+        well, neither ever pays itself back, at any number of rollouts.
+      </figcaption>
+    </figure>
+
+    <figure>
+      <div class="chart-card">
+        <p class="chart-title">The one undecided case</p>
+        <p class="chart-sub" style="margin-bottom:0">
+          On the fluid, the neural operator measured between <span class="num">0.81&times;</span>
+          and <span class="num">1.63&times;</span> the simulator's speed across eight repeats of the
+          benchmark: faster in six, slower in two. A result whose spread straddles 1 is not a
+          speedup, it is an unmeasured quantity, and it is reported as one. Even taking the
+          optimistic end, it would need about <span class="num">14,000</span> rollouts to repay
+          the cost of training it.
+        </p>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ DIAGNOSIS ============ -->
+<section id="diagnosis">
+  <div class="wrap">
+    <p class="kicker">The other half of the project</p>
+    <h2>An agent that works out why a training run went wrong</h2>
+    <div class="prose">
+      <p>
+        Reading two run records and working out what changed is slow, specialised work.
+        <code>nnp diagnose</code> hands both records to a language model and asks for the
+        cause. It changes nothing and runs nothing: it reads and explains.
+      </p>
+      <p>
+        An agent that writes a fluent explanation of a run nobody broke cannot be told apart
+        from one that writes a fluent explanation of anything. So the test is a fault
+        injection. <strong>Seven known faults, written down in advance</strong>, each
+        introduced separately into a copy of the same healthy run. Four of them show up in a
+        configuration file and could be spotted by reading two lines. Three leave no trace
+        anywhere except in the numbers.
+      </p>
+    </div>
+
+    <figure>
+      <div class="chart-card">
+        <p class="chart-title">Naming the true cause, over seven injected faults</p>
+        <p class="chart-sub">Both diagnosers choose from the same twelve labels, five of which no fault uses.</p>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--nbody)"></i>Language model agent</span>
+          <span><i class="swatch" style="background:var(--muted)"></i>Conventional rule-based baseline</span>
+        </div>
+        <svg viewBox="0 0 720 200" role="img" aria-label="Bar chart: the agent names the correct cause first in 86 percent of faults against 14 percent for the rule-based baseline, and within its top three in 100 percent against 43 percent.">
+          <g font-size="12" fill="var(--ink-2)">
+            <text x="0" y="40">Correct cause ranked first</text>
+            <text x="0" y="130">Correct cause in its top three</text>
+          </g>
+          <g>
+            <rect x="220" y="26" width="365" height="18" rx="4" fill="var(--nbody)"/>
+            <text x="597" y="40" font-size="12" font-weight="600" fill="var(--nbody)">86%</text>
+            <rect x="220" y="50" width="59" height="18" rx="4" fill="var(--muted)"/>
+            <text x="291" y="64" font-size="12" font-weight="600" fill="var(--ink-2)">14%</text>
+
+            <rect x="220" y="116" width="425" height="18" rx="4" fill="var(--nbody)"/>
+            <text x="657" y="130" font-size="12" font-weight="600" fill="var(--nbody)">100%</text>
+            <rect x="220" y="140" width="183" height="18" rx="4" fill="var(--muted)"/>
+            <text x="415" y="154" font-size="12" font-weight="600" fill="var(--ink-2)">43%</text>
+          </g>
+          <line x1="220" y1="180" x2="645" y2="180" stroke="var(--axis)"/>
+          <g font-size="11" fill="var(--muted)">
+            <text x="220" y="196">0</text>
+            <text x="645" y="196" text-anchor="end">7 of 7 faults</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        <b>The baseline is not a straw man.</b> It names whichever metric regressed most and
+        maps it to the cause that metric is usually about, using a table written with knowledge
+        of which faults were coming. It still failed to name the cause at all in three of seven.
+      </figcaption>
+    </figure>
+
+    <table>
+      <caption class="chart-sub" style="text-align:left;caption-side:top;padding-bottom:0.5rem">
+        Every fault, and where the agent ranked the true cause.
+      </caption>
+      <thead>
+        <tr><th>What was broken</th><th>In plain terms</th><th>Findable in the config?</th><th class="n">Agent's rank</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Wrong normalisation</td><td>Training statistics that do not describe the data</td><td><span class="tag t-hidden">hidden</span></td><td class="n rank-1">1st</td></tr>
+        <tr><td>Broken symmetry</td><td>A physical symmetry forced back on after every step</td><td><span class="tag t-hidden">hidden</span></td><td class="n rank-1">1st</td></tr>
+        <tr><td>Lost optimiser state</td><td>Resumed from a checkpoint with the optimiser's memory discarded</td><td><span class="tag t-hidden">hidden</span></td><td class="n rank-3">3rd</td></tr>
+        <tr><td>Learning rate too high</td><td>Two hundred times the configured rate</td><td><span class="tag t-visible">visible</span></td><td class="n rank-1">1st</td></tr>
+        <tr><td>Wrong regime</td><td>Training and held-out setups swapped</td><td><span class="tag t-visible">visible</span></td><td class="n rank-1">1st</td></tr>
+        <tr><td>No curriculum</td><td>The multi-step training schedule cut to a single step</td><td><span class="tag t-visible">visible</span></td><td class="n rank-1">1st</td></tr>
+        <tr><td>Unstable integrator</td><td>The simulator run too coarsely to be stable</td><td><span class="tag t-visible">visible</span></td><td class="n rank-1">1st</td></tr>
+      </tbody>
+    </table>
+
+    <div class="prose" style="margin-top:2rem">
+      <p>
+        <strong>The row it got wrong is the most interesting one.</strong> On the lost
+        optimiser state it ranked the true cause third, arguing that the two loss curves start
+        at the same value, finish within half a per cent of each other and show no
+        discontinuity where the resume happened. That reasoning is correct. On a model this
+        small the fault barely does anything. A test suite where every answer is findable
+        measures the suite, not the diagnoser.
+      </p>
+      <p>
+        One caveat stated plainly: no API credential was available, so each context was
+        answered by a separate model instance and scored by the same code rather than by the
+        shipped command. The ranking is honest. The cost per diagnosis was never measured.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHAT DID NOT WORK ============ -->
+<section id="findings">
+  <div class="wrap">
+    <p class="kicker">Negative results, kept</p>
+    <h2>What did not work</h2>
+    <div class="prose">
+      <p>
+        This section is worth more than the successes, so it is not compressed. Every claim
+        here comes from a stored run record, and two of them correct numbers that an earlier
+        version of this project reported wrongly.
+      </p>
+    </div>
+
+    <ul class="findings">
+      <li>
+        <span class="what">The fancy architecture lost to its own control</span>
+        <p class="why">
+          A neural operator was expected to beat a plain convolutional network on the fluid.
+          At a parameter count matched to eight parts in ten thousand and identical training
+          settings, it lost on every accuracy measure. Its single win, behaving consistently
+          when the grid is refined, is real and large, and is the only thing the spectral
+          structure bought.
+        </p>
+      </li>
+      <li>
+        <span class="what">Nothing generalises to an unseen setup</span>
+        <p class="why">
+          The N-body network diverges on all four unseen rollouts, between steps 153 and 159.
+          The fluid operator diverges on all four by step 28. Only the convolutional network
+          survives, and even it is beaten there by doing nothing at all.
+        </p>
+      </li>
+      <li>
+        <span class="what">An ensemble did not rescue a failed model</span>
+        <p class="why">
+          Averaging four networks that have all left the physical manifold gives a path that
+          is not on it either. It diverged a handful of steps later, which is not a rescue.
+        </p>
+      </li>
+      <li>
+        <span class="what">Confidence can be bought with vagueness, and was</span>
+        <p class="why">
+          The fluid ensemble's error bars cover the truth 96% of the time, while being 159
+          times the size of the state being predicted. That is a model saying the answer might
+          be anywhere. Every coverage figure in this project is printed beside its sharpness
+          for exactly that reason.
+        </p>
+      </li>
+      <li>
+        <span class="what">Uncertainty warned too late on one of two systems</span>
+        <p class="why">
+          The fluid ensemble's spread crosses the trust threshold before its error does, which
+          is a usable warning. The N-body ensemble's crosses after. A surrogate that notices it
+          has gone wrong only once it has gone wrong cannot decide when to fall back.
+        </p>
+      </li>
+      <li>
+        <span class="what">Two previously published numbers were wrong</span>
+        <p class="why">
+          An earlier README reported 3 of 4 unseen rollouts completing where the record shows 0
+          of 4, and reported the ensemble diverging sooner where it diverged later. Both are
+          corrected, and the records are why they could be.
+        </p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ RUNS ============ -->
+<section id="runs">
+  <div class="wrap">
+    <p class="kicker">The evidence, unabridged</p>
+    <h2>Every run behind these numbers</h2>
+    <div class="prose">
+      <p>
+        Each run identifier is a hash of the resolved configuration and the seed, so the same
+        configuration reproduces the same identifier. Each record pins the commit, the dataset,
+        the library versions and the machine.
+      </p>
+    </div>
+
+    <div class="runs">
+      <a class="run" data-system="fluid" href="../../runs/fluid-d9241046329768bd/report.html">
+        <span><span class="name">Fluid, convolutional network</span><br><span class="desc">148,889 parameters, 40 epochs</span></span>
+        <span class="cell"><small>usable for</small>11.5 of 63 steps</span>
+        <span class="cell"><small>verdict</small><span class="status s-warn">stable, inaccurate</span></span>
+        <span class="rid">d9241046<br>329768bd</span>
+      </a>
+      <a class="run" data-system="fluid" href="../../runs/fluid-2ecd7cb6a640ed0e/report.html">
+        <span><span class="name">Fluid, neural operator</span><br><span class="desc">149,001 parameters, the matched comparison</span></span>
+        <span class="cell"><small>usable for</small>12.5 of 63 steps</span>
+        <span class="cell"><small>verdict</small><span class="status s-fail">diverges</span></span>
+        <span class="rid">2ecd7cb6<br>a640ed0e</span>
+      </a>
+      <a class="run" data-system="fluid" href="../../runs/fluid-ensemble-d3a72cf54859602c/report.html">
+        <span><span class="name">Fluid, ensemble of four</span><br><span class="desc">Uncertainty and the speed benchmark</span></span>
+        <span class="cell"><small>speed</small>0.81 to 1.63&times;</span>
+        <span class="cell"><small>verdict</small><span class="status s-warn">undecided</span></span>
+        <span class="rid">d3a72cf5<br>4859602c</span>
+      </a>
+      <a class="run" data-system="fluid" href="../../runs/fluid-ca21c7ea505b00d0/report.html">
+        <span><span class="name">Fluid, harness check</span><br><span class="desc">Baselines and deliberately broken predictors only</span></span>
+        <span class="cell"><small>usable for</small>no model</span>
+        <span class="cell"><small>verdict</small><span class="status s-none">sentinel</span></span>
+        <span class="rid">ca21c7ea<br>505b00d0</span>
+      </a>
+      <a class="run" data-system="nbody" href="../../runs/nbody-f68ffffd42abb2f4/report.html">
+        <span><span class="name">N-body, graph network</span><br><span class="desc">62,849 parameters, the default run</span></span>
+        <span class="cell"><small>usable for</small>3.8 of 255 steps</span>
+        <span class="cell"><small>verdict</small><span class="status s-fail">diverges when unseen</span></span>
+        <span class="rid">f68ffffd<br>42abb2f4</span>
+      </a>
+      <a class="run" data-system="nbody" href="../../runs/nbody-ensemble-c8630755200dd028/report.html">
+        <span><span class="name">N-body, ensemble of four</span><br><span class="desc">Uncertainty and the speed benchmark</span></span>
+        <span class="cell"><small>speed</small>0.06&times;</span>
+        <span class="cell"><small>verdict</small><span class="status s-fail">never pays back</span></span>
+        <span class="rid">c8630755<br>200dd028</span>
+      </a>
+      <a class="run" data-system="nbody" href="../../runs/nbody-b1740d93cbe1cc2d/report.html">
+        <span><span class="name">N-body, perceptron</span><br><span class="desc">The comparison that fixes the body count</span></span>
+        <span class="cell"><small>usable for</small>1.3 of 255 steps</span>
+        <span class="cell"><small>verdict</small><span class="status s-fail">cannot run unseen</span></span>
+        <span class="rid">b1740d93<br>cbe1cc2d</span>
+      </a>
+      <a class="run" data-system="nbody" href="../../runs/nbody-fb6b8e43ca3a5a2a/report.html">
+        <span><span class="name">N-body, harness check</span><br><span class="desc">Baselines and deliberately broken predictors only</span></span>
+        <span class="cell"><small>usable for</small>no model</span>
+        <span class="cell"><small>verdict</small><span class="status s-none">sentinel</span></span>
+        <span class="rid">fb6b8e43<br>ca3a5a2a</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      Reports are generated, not written. Rebuild everything linked here with
+      <code>uv run nnp report render --run &lt;run-id&gt;</code>. Every metric in the harness
+      has a sentinel test: a deliberately broken predictor it must catch. A metric that cannot
+      fail is not a metric.
+    </p>
+    <p>
+      Measured on one machine, eight CPU cores, no GPU. Absolute timings do not transfer.
+      Full limitations in <code>docs/results.md</code>.
+    </p>
+  </div>
+</footer>
+
+<script>
+  // Theme
+  const root = document.documentElement;
+  const tbtn = document.getElementById("theme");
+  const setTheme = (t) => { root.dataset.theme = t; tbtn.textContent = t === "dark" ? "light" : "dark"; };
+  setTheme(matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  tbtn.addEventListener("click", () => setTheme(root.dataset.theme === "dark" ? "light" : "dark"));
+
+  // Drift viewer
+  const RUNS = {
+    fluid: {
+      convolution: "../../runs/fluid-d9241046329768bd/plots",
+      operator: "../../runs/fluid-2ecd7cb6a640ed0e/plots",
+      persistence: "../../runs/fluid-d9241046329768bd/plots",
+      noise: "../../runs/fluid-d9241046329768bd/plots",
+    },
+    nbody: {
+      graph: "../../runs/nbody-f68ffffd42abb2f4/plots",
+      persistence: "../../runs/nbody-f68ffffd42abb2f4/plots",
+      noise: "../../runs/nbody-f68ffffd42abb2f4/plots",
+    },
+  };
+  const LABELS = {
+    convolution: "Convolutional", operator: "Neural operator",
+    graph: "Graph network", persistence: "Repeat last state", noise: "Random noise",
+  };
+  const NOTES = {
+    fluid: {
+      what: "Vorticity on a 64 by 64 grid. Red is spinning one way, blue the other. The top row is the true flow, the bottom row is the prediction.",
+      nbody: false,
+    },
+    nbody: {
+      what: "32 point masses under gravity, seen from above. Black dots are the true positions, open blue circles are the predicted ones. They start on top of each other.",
+    },
+  };
+  const MEANING = {
+    "fluid|convolution|test": "The large structures survive, but by the end the prediction is smoother than the truth and a faint checkerboard pattern has appeared. It is tracking the flow while inventing texture the physics never produced.",
+    "fluid|convolution|held_out": "It stays stable on a flow it never trained on, which none of the others manage. It is still not accurate, and doing nothing at all scores better over one step.",
+    "fluid|operator|test": "Two of the four rollouts leave the physical range entirely. The final error is roughly a thousand times the size of the state, which is not degradation, it is failure.",
+    "fluid|operator|held_out": "All four rollouts diverge by step 28. The architecture that was expected to generalise best generalised worst.",
+    "fluid|persistence|test": "The free baseline: return the input unchanged. It never diverges, and over one step it is more accurate than the neural operator.",
+    "fluid|persistence|held_out": "On a slowly evolving flow, returning the input is a genuinely good answer, and it beats both trained networks over one step.",
+    "fluid|noise|test": "A deliberately broken predictor, included so the metrics can be checked against something that must score badly. A metric that cannot fail is not a metric.",
+    "fluid|noise|held_out": "The same broken predictor on the unseen flow. Every metric must catch it, and a test asserts that each one does.",
+    "nbody|graph|test": "The cluster stays roughly the right size and shape, but by the end individual bodies are in visibly the wrong places. The statistics survive longer than the trajectories.",
+    "nbody|graph|held_out": "Two tight binaries, a configuration no training setup contained. All four rollouts blow up, between steps 153 and 159. Nothing in the training numbers predicted it.",
+    "nbody|persistence|test": "The free baseline: the bodies simply do not move. It is beaten six times over on one step error by the graph network, which is the one clear win in the project.",
+    "nbody|persistence|held_out": "Frozen bodies still score better than the graph network here, because the graph network's answer has left the physical range altogether.",
+    "nbody|noise|test": "A deliberately broken predictor, included so the metrics can be checked against something that must score badly.",
+    "nbody|noise|held_out": "The same broken predictor on the unseen setup, as a control on the metrics rather than on the model.",
+  };
+
+  let sys = "fluid", model = "convolution", split = "test";
+  const seg = document.getElementById("model-seg");
+  const img = document.getElementById("strip");
+
+  function renderModels() {
+    seg.innerHTML = "";
+    Object.keys(RUNS[sys]).forEach((m) => {
+      const b = document.createElement("button");
+      b.textContent = LABELS[m];
+      b.dataset.model = m;
+      b.setAttribute("aria-pressed", String(m === model));
+      b.addEventListener("click", () => { model = m; renderModels(); render(); });
+      seg.appendChild(b);
+    });
+  }
+  function render() {
+    img.src = `${RUNS[sys][model]}/${split}-state-${model}.png`;
+    img.alt = `${LABELS[model]} prediction against the true ${sys} simulation, ${split === "test" ? "trained-on" : "unseen"} setup`;
+    document.getElementById("note-what").textContent = NOTES[sys].what;
+    document.getElementById("note-mean").textContent =
+      MEANING[`${sys}|${model}|${split}`] || "";
+  }
+  document.querySelectorAll("[data-sys]").forEach((b) =>
+    b.addEventListener("click", () => {
+      sys = b.dataset.sys;
+      document.querySelectorAll("[data-sys]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      model = Object.keys(RUNS[sys])[0];
+      renderModels(); render();
+    })
+  );
+  document.querySelectorAll("[data-split]").forEach((b) =>
+    b.addEventListener("click", () => {
+      split = b.dataset.split;
+      document.querySelectorAll("[data-split]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      render();
+    })
+  );
+  renderModels(); render();
+</script>
+</body>
+</html>
