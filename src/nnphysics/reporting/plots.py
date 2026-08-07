@@ -179,7 +179,7 @@ def drift_plot(result: SuiteResult, split: str, path: Path) -> PlotRecord | None
                     color=_colour(entry.predictor, index),
                     label=entry.predictor if row == 0 else None,
                 )
-            target.axhspan(-tolerance, tolerance, color="#000000", alpha=0.08)
+            target.axhspan(-tolerance, tolerance, color=REFERENCE_COLOUR, alpha=0.08)
             target.set_yscale("symlog", linthresh=tolerance)
             units = invariant.dimension if invariant is not None else "declared units"
             label_axes(

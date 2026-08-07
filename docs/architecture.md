@@ -119,7 +119,7 @@ src/nnphysics/
   evals/      runner, rollout, result, snapshots, speed, benchmark,
               metrics/, predictors/
   reporting/  record, document, explain, layout, plots, render, style,
-              compare, environment, index
+              theme, compare, environment, index
   agent/      client, context, causes, diagnose, faults, scoring
   cli/        app, commands, data, evals, train, ensemble, benchmark,
               report, diagnose, faultrun, pipeline, predictors
