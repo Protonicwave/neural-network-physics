@@ -27,6 +27,7 @@ ALL_METRICS = (
     "invariant_drift",
     "symmetry_violation",
     "distribution_drift",
+    "calibration",
 )
 
 # The smallest settings that still resolve every declared regime: a 32 by 32 grid for the
@@ -97,6 +98,7 @@ class _Scene:
             reference=_prefix(self.truth(steps), len(result.trajectory)),
             predictor=result.predictor,
             system=self.system.name,
+            spread=result.spread,
         )
         context = MetricContext(
             invariants=self.system.invariants(self.regime),

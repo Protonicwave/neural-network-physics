@@ -1,9 +1,11 @@
 """The figures a report carries.
 
-Four of them, each answering a question a table cannot. How fast does the error grow.
-Does the predictor drift out of the band the system declared. Is the average error a fair
-summary or is one trajectory of four carrying it. And what does being wrong actually look
-like.
+Each answers a question a table cannot. How fast does the error grow. Does the predictor
+drift out of the band the system declared. Is the average error a fair summary or is one
+trajectory of four carrying it. What does being wrong actually look like. Is the
+uncertainty a predictor states the right size, and does it grow before the error does.
+And what does the accuracy cost in wall clock, against a solver that has a knob of its
+own.
 
 Nothing here knows which system it is looking at. The qualitative plot chooses how to
 draw a field from the shape of the field: a list of two component vectors is drawn in the
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from nnphysics.core.types import FloatArray
     from nnphysics.evals.result import InvariantRecord, PredictorResult, SuiteResult
     from nnphysics.evals.snapshots import Snapshot, SnapshotSet
+    from nnphysics.evals.speed import SpeedReport
 
 __all__ = [
     "DISTRIBUTION_SCALAR",
@@ -38,8 +41,11 @@ __all__ = [
     "drift_plot",
     "error_plot",
     "overlay_plot",
+    "reliability_plot",
     "render_plots",
     "snapshot_plot",
+    "speed_plot",
+    "warning_plot",
 ]
 
 DISTRIBUTION_SCALAR = "rollout_error.error.final"
@@ -48,6 +54,13 @@ end of the rollout, because that is the number a claim about a surrogate rests o
 
 _PLANE_COMPONENTS = 2
 """A field with this many components per element is drawn as points in the plane."""
+
+_MILLISECONDS = 1.0e3
+
+_ERROR_FLOOR = 1.0e-16
+"""Where an error of exactly zero is drawn on a logarithmic axis. The rung of the ladder
+that produced ground truth has one, and dropping the point would hide the anchor the rest
+of the curve is measured against."""
 
 _JITTER = 0.11
 """Horizontal separation between the trajectories of one predictor, so that two equal
@@ -334,8 +347,184 @@ def overlay_plot(
     )
 
 
+def reliability_plot(result: SuiteResult, split: str, path: Path) -> PlotRecord | None:
+    """Draw the coverage each predictor delivered against the coverage it claimed.
+
+    The diagonal is a predictor whose stated uncertainty is exactly the right size. Below
+    it is overconfident, which is the dangerous direction: a model that says it is sure
+    and is wrong. Above it is a model hedging more than it needs to.
+
+    Args:
+        result: The evaluation result.
+        split: Split to draw.
+        path: File to write.
+
+    Returns:
+        The record, or `None` if no predictor on that split stated an uncertainty.
+    """
+    drawn = [
+        (entry, nominal, empirical)
+        for entry in _on_split(result, split)
+        if (nominal := _series(entry, "calibration", "reliability.nominal")) is not None
+        and (empirical := _series(entry, "calibration", "reliability.empirical")) is not None
+    ]
+    if not drawn:
+        return None
+
+    with figure() as (fig, axes):
+        target = axes[0][0]
+        target.plot((0.0, 1.0), (0.0, 1.0), color=REFERENCE_COLOUR, linestyle="--", linewidth=1.0)
+        for index, (entry, nominal, empirical) in enumerate(drawn):
+            target.plot(
+                nominal, empirical, marker="o", markersize=3, color=_colour(entry.predictor, index)
+            )
+            target.plot([], [], color=_colour(entry.predictor, index), label=entry.predictor)
+        target.set_xlim(0.0, 1.0)
+        target.set_ylim(0.0, 1.0)
+        label_axes(
+            target,
+            title=f"Reliability, {split} split",
+            xlabel="coverage the predictor claimed",
+            ylabel="coverage it delivered",
+        )
+        target.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
+        save(fig, path)
+    return PlotRecord(
+        path.name,
+        f"Reliability, {split} split",
+        "The dashed diagonal is a stated uncertainty of exactly the right size. Below it "
+        "the predictor is overconfident, which is the direction that matters: it is sure "
+        "and wrong. Above it the predictor is hedging.",
+    )
+
+
+def warning_plot(result: SuiteResult, split: str, path: Path) -> PlotRecord | None:
+    """Draw each predictor's stated uncertainty against the error it actually made.
+
+    The question this answers is the practical one. If the spread curve crosses the level
+    at which a prediction stops being worth using before the error curve does, the
+    predictor can say when to fall back to the solver.
+
+    Args:
+        result: The evaluation result.
+        split: Split to draw.
+        path: File to write.
+
+    Returns:
+        The record, or `None` if no predictor on that split stated an uncertainty.
+    """
+    drawn = [
+        (entry, spread, error, _series(entry, "calibration", "time"))
+        for entry in _on_split(result, split)
+        if (spread := _series(entry, "calibration", "spread")) is not None
+        and (error := _series(entry, "calibration", "error")) is not None
+    ]
+    if not drawn:
+        return None
+
+    threshold = result.settings.trust_threshold
+    with figure() as (fig, axes):
+        target = axes[0][0]
+        target.axhline(threshold, color=REFERENCE_COLOUR, linestyle="--", linewidth=1.0)
+        for index, (entry, spread, error, time) in enumerate(drawn):
+            horizon = time if time is not None else np.arange(len(error), dtype=np.float64)
+            shade = _colour(entry.predictor, index)
+            target.plot(horizon, _positive(error), color=shade, label=f"{entry.predictor}, error")
+            target.plot(
+                horizon,
+                _positive(spread),
+                color=shade,
+                linestyle=":",
+                label=f"{entry.predictor}, spread",
+            )
+        target.set_yscale("log")
+        label_axes(
+            target,
+            title=f"Stated uncertainty against actual error, {split} split",
+            xlabel="simulated time",
+            ylabel="relative to the size of the true state",
+        )
+        target.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
+        save(fig, path)
+    return PlotRecord(
+        path.name,
+        f"Uncertainty against error, {split} split",
+        f"Solid is the error the predictor made, dotted is the uncertainty it stated. The "
+        f"dashed line at {threshold:g} is where a prediction stops being worth using: a "
+        f"predictor whose dotted curve crosses it first can say when to fall back to the "
+        f"solver.",
+    )
+
+
+def speed_plot(report: SpeedReport, path: Path) -> PlotRecord:
+    """Draw accuracy against wall clock for the solver ladder and every surrogate.
+
+    Both axes are logarithmic because both quantities span orders of magnitude. The
+    solver's rungs are joined into a curve, since they are one thing at different
+    settings; a surrogate is a single point, because it has no equivalent knob.
+
+    Args:
+        report: What the benchmark measured.
+        path: File to write.
+
+    Returns:
+        The record.
+    """
+    with figure() as (fig, axes):
+        target = axes[0][0]
+        ladder = sorted(report.ladder, key=lambda point: point.seconds_per_step)
+        target.plot(
+            [point.seconds_per_step * _MILLISECONDS for point in ladder],
+            [max(point.error, _ERROR_FLOOR) for point in ladder],
+            color=REFERENCE_COLOUR,
+            marker="o",
+            markersize=4,
+            label="solver, by substeps",
+        )
+        for point in ladder:
+            target.annotate(
+                f"{point.substeps}",
+                (point.seconds_per_step * _MILLISECONDS, max(point.error, _ERROR_FLOOR)),
+                textcoords="offset points",
+                xytext=(4, 4),
+                fontsize=7,
+            )
+        for index, point in enumerate(report.surrogates):
+            target.plot(
+                point.seconds_per_step * _MILLISECONDS,
+                max(point.error, _ERROR_FLOOR),
+                marker="D",
+                markersize=6,
+                linestyle="none",
+                color=colour(index),
+                label=point.predictor,
+            )
+        target.set_xscale("log")
+        target.set_yscale("log")
+        label_axes(
+            target,
+            title=f"Accuracy against wall clock, {report.system}",
+            xlabel="milliseconds per stored interval",
+            ylabel="worst error over the horizon",
+        )
+        target.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
+        save(fig, path)
+    return PlotRecord(
+        path.name,
+        f"Accuracy against wall clock, {report.system}",
+        f"Down and to the left is better. The black curve is the reference solver at each "
+        f"substep count, labelled; the rung at {report.dataset_substeps} substeps produced "
+        f"the ground truth, so its error is zero by construction and it is drawn at the "
+        f"floor of the axis. A surrogate is worth having only if it sits below and to the "
+        f"left of that curve.",
+    )
+
+
 def render_plots(
-    result: SuiteResult, snapshots: SnapshotSet | None, directory: Path
+    result: SuiteResult,
+    snapshots: SnapshotSet | None,
+    directory: Path,
+    benchmark: SpeedReport | None = None,
 ) -> tuple[PlotRecord, ...]:
     """Draw every figure a report needs.
 
@@ -343,6 +532,8 @@ def render_plots(
         result: The evaluation result.
         snapshots: Kept states, or `None` if none were captured.
         directory: Directory to write into. It must exist.
+        benchmark: What the timings measured, or `None` for a run that was never
+            benchmarked.
 
     Returns:
         One record per figure written, in the order a report should show them.
@@ -353,6 +544,8 @@ def render_plots(
             error_plot(result, split, directory / f"{split}-error.png"),
             drift_plot(result, split, directory / f"{split}-invariant-drift.png"),
             distribution_plot(result, split, directory / f"{split}-spread.png"),
+            reliability_plot(result, split, directory / f"{split}-reliability.png"),
+            warning_plot(result, split, directory / f"{split}-uncertainty.png"),
         )
         records.extend(record for record in drawn if record is not None)
         for snapshot in snapshots.snapshots if snapshots else ():
@@ -361,7 +554,15 @@ def render_plots(
             record = snapshot_plot(snapshot, directory / f"{split}-state-{snapshot.predictor}.png")
             if record is not None:
                 records.append(record)
+    if benchmark is not None:
+        records.append(speed_plot(benchmark, directory / "speed.png"))
     return tuple(records)
+
+
+def _positive(values: FloatArray) -> FloatArray:
+    """A curve with its non positive points removed, for a logarithmic axis."""
+    hidden: FloatArray = np.where(values > 0.0, values, np.nan)
+    return hidden
 
 
 def _plane_panels(

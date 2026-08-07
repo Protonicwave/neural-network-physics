@@ -24,7 +24,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from nnphysics.core.errors import UnknownNameError
-from nnphysics.evals.metrics import NEVER_REACHED
+from nnphysics.evals.metrics import (
+    NEVER_REACHED,
+    NOT_DETERMINED,
+    ONE_SIGMA_COVERAGE,
+    UNDEFINED_CORRELATION,
+)
 
 if TYPE_CHECKING:
     from nnphysics.evals.result import InvariantRecord, SuiteResult
@@ -47,6 +52,7 @@ _NORMALISED = "1 (normalised)"
 _TIME = "simulated time"
 _STEPS = "steps"
 _SECONDS = "seconds"
+_PROBABILITY = "1 (probability)"
 _DECLARED = "@declared"
 """Marker for units taken from the dimension the system declared for a named invariant."""
 
@@ -149,6 +155,13 @@ METRIC_SUMMARIES: Mapping[str, str] = {
         "predictor whose parameters describe the physics should agree with itself; one "
         "whose parameters describe the grid should not. A system whose states are not a "
         "discretisation of anything is not tested, and reports zero steps."
+    ),
+    "calibration": (
+        "Whether the predictor's own statement of its uncertainty is worth believing. "
+        "Two separate questions: is the spread the right size, and does it grow when the "
+        "error does. A surrogate that knows when it is wrong can hand the problem back "
+        "to the solver, which is worth more than being slightly more accurate. A "
+        "predictor that states no uncertainty is not scored and reports zero steps."
     ),
     TIMING_METRIC: (
         "What the predictor cost to run. A surrogate earns its place by being faster "
@@ -258,6 +271,81 @@ _EXACT: Mapping[str, Mapping[str, _Rule]] = {
             "Steps the resolution test rolled out for, shorter than the main rollout "
             "because the refined rollout works on a state several times the size. Zero "
             "means the system declares no finer resolution, so nothing was tested.",
+        ),
+    },
+    "calibration": {
+        "ece": _Rule(
+            "expected calibration error",
+            _PROBABILITY,
+            Direction.LOWER,
+            "Average gap between the coverage the predictor's spread claims and the "
+            "coverage it delivers, over a range of levels. Zero is a spread of exactly "
+            "the right size; a predictor whose spread is far too small approaches the "
+            "average of the levels tested.",
+        ),
+        "coverage": _Rule(
+            "coverage at one standard deviation",
+            _PROBABILITY,
+            Direction.NEUTRAL,
+            f"Fraction of the true values that fell inside one stated standard "
+            f"deviation. The ideal is {ONE_SIGMA_COVERAGE:.4g}, what a correctly sized Gaussian "
+            f"delivers: far below means overconfident, far above means the spread is "
+            f"larger than it needs to be.",
+        ),
+        "sharpness": _Rule(
+            "sharpness",
+            _NORMALISED,
+            Direction.LOWER,
+            "Mean stated spread, measured against the size of the true state. Only "
+            "meaningful beside the calibration error: a predictor can be perfectly "
+            "calibrated by claiming it might be anywhere, and this is the number that "
+            "shows it did.",
+        ),
+        "spread_error_correlation": _Rule(
+            "spread against error",
+            _NORMALISED,
+            Direction.HIGHER,
+            "Correlation between the stated spread and the actual error along the "
+            "rollout. A spread of the right size on average is still useless if it is "
+            "the same at every step, and this is what separates the two.",
+            sentinel=UNDEFINED_CORRELATION,
+            sentinel_text="undefined, one of the two curves does not vary",
+        ),
+        "horizon.error": _Rule(
+            "horizon, error",
+            _TIME,
+            Direction.HIGHER,
+            "Simulated time before the error first passes the level at which a "
+            "prediction stops being worth using.",
+            sentinel=NEVER_REACHED,
+            sentinel_text="never reached",
+        ),
+        "horizon.spread": _Rule(
+            "horizon, spread",
+            _TIME,
+            Direction.NEUTRAL,
+            "Simulated time before the stated spread first passes that same level. "
+            "Never reached, beside an error horizon that was reached, is a predictor "
+            "that failed without warning.",
+            sentinel=NEVER_REACHED,
+            sentinel_text="never reached",
+        ),
+        "warning_lead": _Rule(
+            "warning lead",
+            _TIME,
+            Direction.HIGHER,
+            "How long before the error became unacceptable the spread said so. Positive "
+            "means the predictor can say when to fall back to the solver, which is the "
+            "practically useful result. Negative means the warning came too late.",
+            sentinel=NOT_DETERMINED,
+            sentinel_text="not determined, one of the two horizons was never reached",
+        ),
+        "steps": _Rule(
+            "steps tested",
+            _STEPS,
+            Direction.NEUTRAL,
+            "Steps the calibration test scored. Zero means the predictor states no "
+            "uncertainty, so there was no claim to judge.",
         ),
     },
     TIMING_METRIC: {

@@ -4,13 +4,26 @@ This is the structured log the plan asks for, and it is a value rather than a st
 printed lines so that it can be embedded in the run record from phase 06 and compared
 against another run's. Nothing here reads the clock: durations are measured by the loop
 and handed in.
+
+It can also be written on its own. A run that trains and evaluates in one command embeds
+it in the record, but an ensemble member is trained without being evaluated, and what it
+cost is exactly what the cost accounting in phase 09 needs. A member whose training time
+was not written down would be accounted as free.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import json
+from typing import TYPE_CHECKING
 
-__all__ = ["EpochRecord", "TrainingHistory"]
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from nnphysics.core.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+__all__ = ["EpochRecord", "TrainingHistory", "read_history", "write_history"]
 
 
 class EpochRecord(BaseModel):
@@ -81,3 +94,38 @@ class TrainingHistory(BaseModel):
     def final(self) -> EpochRecord:
         """The last epoch run."""
         return self.epochs[-1]
+
+
+def write_history(path: Path, history: TrainingHistory) -> None:
+    """Write a training history on its own.
+
+    Args:
+        path: File to write. Its parent must exist.
+        history: The history.
+    """
+    path.write_text(history.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
+def read_history(path: Path) -> TrainingHistory:
+    """Read a training history written on its own.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        The history.
+
+    Raises:
+        ConfigurationError: If the file is missing, is not valid JSON, or does not
+            describe a training run.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise ConfigurationError(f"cannot read training history {path}: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ConfigurationError(f"{path} is not valid JSON: {error}") from error
+    try:
+        return TrainingHistory.model_validate(raw)
+    except ValidationError as error:
+        raise ConfigurationError(f"invalid training history in {path}: {error}") from error

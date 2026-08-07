@@ -118,7 +118,7 @@ def run(
             directory,
             manifest,
             resolved.evaluation,
-            seed=resolved.seed,
+            seed=resolved.run_seed,
             run_id=resolved.run_id,
             predictors=predictor or None,
             splits=split or None,
@@ -189,7 +189,7 @@ def _capture(
                 specs,
                 config.evaluation,
                 substeps=manifest.spec.substeps,
-                seed=config.seed,
+                seed=config.run_seed,
             ).snapshots
         )
     return SnapshotSet(tuple(kept))

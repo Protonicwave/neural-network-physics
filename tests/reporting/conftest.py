@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from nnphysics.core.config import RunConfig
-from nnphysics.evals.metrics import NEVER_REACHED
+from nnphysics.evals.metrics import NEVER_REACHED, NOT_DETERMINED
 from nnphysics.evals.result import (
     InvariantRecord,
     MetricRecord,
@@ -14,6 +14,12 @@ from nnphysics.evals.result import (
     RolloutRecord,
     SuiteResult,
     SuiteSettings,
+)
+from nnphysics.evals.speed import (
+    SpeedPoint,
+    SpeedReport,
+    cost_accounting,
+    matched_speedup,
 )
 from nnphysics.reporting.environment import EnvironmentRecord
 from nnphysics.reporting.record import RunRecord
@@ -237,3 +243,109 @@ def make_record() -> Callable[..., RunRecord]:
 def record() -> RunRecord:
     """The baseline record every rendering test starts from."""
     return _make_record()
+
+
+def _calibration(*, overconfident: bool) -> MetricRecord:
+    """What a predictor that states an uncertainty produces, honest or not."""
+    factor = 100.0 if overconfident else 1.0
+    return MetricRecord(
+        name="calibration",
+        scalars={
+            "steps": 4.0,
+            "ece": 0.45 if overconfident else 0.02,
+            "coverage": 0.01 if overconfident else 0.68,
+            "sharpness": 0.004 / factor,
+            "spread_error_correlation": 0.9,
+            "horizon.error": 0.02,
+            "horizon.spread": NEVER_REACHED if overconfident else 0.01,
+            "warning_lead": NOT_DETERMINED if overconfident else 0.01,
+        },
+        series={
+            "reliability.nominal": (0.25, 0.5, 0.75),
+            "reliability.empirical": (0.0, 0.01, 0.02) if overconfident else (0.24, 0.51, 0.74),
+            "spread": (0.0, 0.02, 0.05, 0.09),
+            "error": (0.0, 0.03, 0.08, 0.15),
+            "time": (0.0, 0.01, 0.02, 0.03),
+        },
+    )
+
+
+def _speed_point(substeps: int, error: float, seconds: float, *, name: str = "reference") -> Any:
+    return SpeedPoint(
+        label=f"{name}:substeps={substeps}" if substeps else name,
+        predictor=name,
+        kind="solver" if substeps else "surrogate",
+        substeps=substeps,
+        error=error,
+        seconds_per_step=seconds,
+        iqr=seconds * 0.02,
+        relative_spread=0.02,
+        stable=True,
+        completed=True,
+    )
+
+
+def _make_speed_report() -> SpeedReport:
+    """A benchmark whose surrogate is faster than the solver setting it matches."""
+    ladder = (
+        _speed_point(1, 0.8, 0.004),
+        _speed_point(2, 0.2, 0.008),
+        _speed_point(4, 0.0, 0.016),
+    )
+    surrogate = _speed_point(0, 0.3, 0.002, name="operator")
+    return SpeedReport(
+        system="toy",
+        split="test",
+        steps=4,
+        n_initial_conditions=2,
+        threads=8,
+        trials=7,
+        warmup=2,
+        steps_per_trial=16,
+        dataset_substeps=4,
+        ladder=ladder,
+        surrogates=(surrogate,),
+        matched=(matched_speedup(surrogate, ladder),),
+        costs=(
+            cost_accounting(
+                matched_speedup(surrogate, ladder),
+                training_seconds=100.0,
+                generation_seconds=20.0,
+                steps_per_rollout=4,
+            ),
+        ),
+    )
+
+
+@pytest.fixture(scope="session")
+def make_speed_report() -> Callable[[], SpeedReport]:
+    """Build a benchmark carrying a ladder, a surrogate and its accounting."""
+    return _make_speed_report
+
+
+@pytest.fixture
+def benchmarked(record: RunRecord) -> RunRecord:
+    """The baseline record with a benchmark attached."""
+    return record.model_copy(update={"benchmark": _make_speed_report()})
+
+
+@pytest.fixture
+def uncertain_result() -> SuiteResult:
+    """A suite result whose two predictors state an uncertainty, one of them dishonestly."""
+    base = _make_result(predictors=("calibrated", "overconfident"), splits=("test",))
+    return base.model_copy(
+        update={
+            "settings": base.settings.model_copy(update={"metrics": (*METRICS, "calibration")}),
+            "results": tuple(
+                entry.model_copy(
+                    update={
+                        "metrics": (
+                            *entry.metrics,
+                            _calibration(overconfident=entry.predictor == "overconfident"),
+                        )
+                    }
+                )
+                for entry in base.results
+            ),
+        }
+    )

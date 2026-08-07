@@ -14,7 +14,9 @@ from typing import Annotated
 
 import typer
 
+from nnphysics.cli.benchmark import benchmark
 from nnphysics.cli.data import app as data_app
+from nnphysics.cli.ensemble import app as ensemble_app
 from nnphysics.cli.evals import app as eval_app
 from nnphysics.cli.report import app as report_app
 from nnphysics.cli.train import train
@@ -65,6 +67,7 @@ def register(app: typer.Typer) -> None:
     """
     app.add_typer(data_app)
     app.add_typer(eval_app)
+    app.add_typer(ensemble_app)
     app.add_typer(report_app)
-    for command in (train, diagnose):
+    for command in (train, benchmark, diagnose):
         app.command()(command)

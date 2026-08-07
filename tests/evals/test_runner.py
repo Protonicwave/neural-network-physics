@@ -8,10 +8,13 @@ import pytest
 from nnphysics.core.config import RunConfig
 from nnphysics.core.errors import UnknownNameError, ValidationError
 from nnphysics.core.protocols import System
+from nnphysics.core.types import MetricResult
 from nnphysics.data.manifest import Manifest, Split
+from nnphysics.evals.metrics import NEVER_REACHED
 from nnphysics.evals.result import SuiteResult
 from nnphysics.evals.runner import (
     EvaluationCase,
+    _aggregate,
     evaluate_predictor,
     load_cases,
     regime_gap,
@@ -353,3 +356,54 @@ class _Refusing:
 def _refusing(context: Any, parameters: Any) -> Any:
     del parameters
     return _Refusing(context.reference.dt)
+
+
+class TestAveragingOverInitialConditions:
+    """A sentinel is not a quantity, so it must not be averaged into one."""
+
+    def test_a_horizon_no_rollout_reached_stays_the_sentinel(
+        self, dataset: tuple[Path, Manifest, RunConfig]
+    ) -> None:
+        directory, manifest, config = dataset
+        system = build_system(config.system.name, config.system.parameters)
+        cases = load_cases(directory, manifest, system, split=Split.TEST, count=2, steps=4)
+
+        result = evaluate_predictor(
+            system, cases, "reference", config.evaluation, substeps=2, seed=0
+        )
+
+        assert result.scalar("rollout_error", "horizon.0.01") == NEVER_REACHED
+
+    def test_a_mean_is_taken_over_the_rollouts_that_measured_something(self) -> None:
+        """Three rollouts that never crossed and one that crossed at 0.3.
+
+        That is a horizon of 0.3, not of 0.075.
+        """
+        crossed = MetricResult(
+            name="rollout_error",
+            scalars={"horizon.0.1": 0.3},
+            sentinels={"horizon.0.1": NEVER_REACHED},
+        )
+        never = MetricResult(
+            name="rollout_error",
+            scalars={"horizon.0.1": NEVER_REACHED},
+            sentinels={"horizon.0.1": NEVER_REACHED},
+        )
+
+        records = _aggregate([(crossed,), (never,), (never,), (never,)])
+
+        assert records[0].scalars["horizon.0.1"] == 0.3
+
+    def test_a_scalar_with_no_sentinel_is_averaged_as_before(self) -> None:
+        first = MetricResult(name="one_step_error", scalars={"error": 0.2})
+        second = MetricResult(name="one_step_error", scalars={"error": 0.4})
+
+        records = _aggregate([(first,), (second,)])
+
+        assert records[0].scalars["error"] == pytest.approx(0.3)
+
+    def test_a_metric_cannot_declare_a_sentinel_for_a_scalar_it_did_not_produce(
+        self,
+    ) -> None:
+        with pytest.raises(ValidationError, match="declares sentinels"):
+            MetricResult(name="rollout_error", scalars={}, sentinels={"horizon.0.1": -1.0})

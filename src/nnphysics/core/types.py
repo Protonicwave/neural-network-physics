@@ -28,6 +28,7 @@ __all__ = [
     "FieldSpec",
     "FloatArray",
     "MetricResult",
+    "Prediction",
     "Regime",
     "Rollout",
     "State",
@@ -174,6 +175,49 @@ class State:
 
 
 @dataclass(frozen=True, slots=True)
+class Prediction:
+    """A predicted state together with how uncertain the predictor is about it.
+
+    A `Predictor` returns a state and says nothing about its own confidence. Some can say
+    more: an ensemble knows how far its members disagree. This is how that reaches the
+    harness without any metric learning what an ensemble is, and without the plain
+    predictor interface growing a field that most predictors would have to fake.
+
+    The spread is a standard deviation in the field's own units, one number per element,
+    so it can be compared against a residual directly. Every field of the state carries
+    one, including a field the predictor merely copies: the honest spread there is zero,
+    and leaving it out would make a missing claim indistinguishable from a confident one.
+
+    Attributes:
+        state: The predicted state.
+        spread: Field name to the predictive standard deviation of that field.
+    """
+
+    state: State
+    spread: Mapping[str, FloatArray]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "spread", _freeze_fields(self.spread, context="prediction spread"))
+        missing = sorted(set(self.state.fields) - set(self.spread))
+        if missing:
+            raise ValidationError(f"prediction carries no spread for fields {missing}")
+        unexpected = sorted(set(self.spread) - set(self.state.fields))
+        if unexpected:
+            raise ValidationError(f"prediction carries a spread for undeclared fields {unexpected}")
+        for name, array in self.spread.items():
+            if array.shape != self.state.fields[name].shape:
+                raise ValidationError(
+                    f"prediction spread for {name!r} has shape {array.shape}, expected "
+                    f"{self.state.fields[name].shape}"
+                )
+            # A comparison against a NaN is false, so this rejects a negative spread and
+            # lets a non finite one through to the rollout driver, whose job it is to stop
+            # and say which step stopped producing numbers.
+            if bool(np.any(array < 0.0)):
+                raise ValidationError(f"prediction spread for {name!r} has a negative value")
+
+
+@dataclass(frozen=True, slots=True)
 class Trajectory:
     """A time ordered sequence of states, stored as stacked arrays.
 
@@ -264,12 +308,16 @@ class Rollout:
         reference: Ground truth over the same times.
         predictor: Name of the predictor that produced `predicted`.
         system: Name of the system the trajectories belong to.
+        spread: The predictor's own uncertainty at each step, or `None` for a predictor
+            that claims none. Same fields and length as `predicted`, with zero at the
+            initial state, which is known exactly because it was handed in.
     """
 
     predicted: Trajectory
     reference: Trajectory
     predictor: str
     system: str
+    spread: Trajectory | None = None
 
     def __post_init__(self) -> None:
         if len(self.predicted) != len(self.reference):
@@ -284,6 +332,17 @@ class Rollout:
             )
         if not np.allclose(self.predicted.times, self.reference.times):
             raise ValidationError("rollout times differ between predicted and reference")
+        if self.spread is not None:
+            if len(self.spread) != len(self.predicted):
+                raise ValidationError(
+                    f"rollout spread has {len(self.spread)} steps, predicted has "
+                    f"{len(self.predicted)}"
+                )
+            if set(self.spread.names) != set(self.predicted.names):
+                raise ValidationError(
+                    f"rollout spread has fields {self.spread.names}, predicted has "
+                    f"{self.predicted.names}"
+                )
 
     def __len__(self) -> int:
         return len(self.reference)
@@ -302,14 +361,29 @@ class MetricResult:
         name: Name of the metric that produced this result.
         scalars: Named scalar values, the numbers that go in a report table.
         series: Named one dimensional arrays over rollout steps, for plots.
+        sentinels: For each scalar that has one, the value standing for a thing that did
+            not happen rather than for a measurement of it. A horizon that was never
+            reached is the example.
+
+            Declared because these numbers are averaged over initial conditions, and a
+            mean of one rollout that crossed a threshold at 0.3 and three that never
+            crossed it at all is not a horizon of anything. Whoever averages them has to
+            know which values are not quantities, and only the metric can say.
     """
 
     name: str
     scalars: Mapping[str, float]
     series: Mapping[str, FloatArray] = field(default_factory=dict)
+    sentinels: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValidationError("a metric result must carry the metric name")
         object.__setattr__(self, "scalars", MappingProxyType(dict(self.scalars)))
         object.__setattr__(self, "series", MappingProxyType(dict(self.series)))
+        unknown = sorted(set(self.sentinels) - set(self.scalars))
+        if unknown:
+            raise ValidationError(
+                f"metric {self.name!r} declares sentinels for scalars it did not produce: {unknown}"
+            )
+        object.__setattr__(self, "sentinels", MappingProxyType(dict(self.sentinels)))

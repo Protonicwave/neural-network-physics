@@ -81,7 +81,7 @@ def render(
         paths = RunPaths(record_path.parent)
         paths.ensure()
         snapshots = read_snapshots(paths.snapshots) if paths.snapshots.is_file() else None
-        plots = render_plots(record.evaluation, snapshots, paths.plots)
+        plots = render_plots(record.evaluation, snapshots, paths.plots, record.benchmark)
         paths.markdown.write_text(render_markdown(record, plots), encoding="utf-8")
         paths.html.write_text(render_html(record, plots, plot_dir=paths.plots), encoding="utf-8")
     except NNPhysicsError as error:

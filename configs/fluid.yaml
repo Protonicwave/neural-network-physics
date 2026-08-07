@@ -67,6 +67,10 @@ training:
   multi_step_weight: 1.0
   physics_weight: 0.0
 
+# Four models of this configuration, differing only in initialisation and shuffling.
+ensemble:
+  members: 4
+
 evaluation:
   name: standard
   metrics:
@@ -76,6 +80,8 @@ evaluation:
     - symmetry_violation
     - distribution_drift
     - resolution_generalisation
+    - calibration
+  # The last two state an uncertainty, one honestly and one a hundred times too small.
   predictors:
     - reference
     - persistence
@@ -83,6 +89,8 @@ evaluation:
     - noise
     - energy_injection
     - symmetry_break
+    - calibrated
+    - overconfident
   rollout_steps: 63
   n_initial_conditions: 4
   error_thresholds: [0.01, 0.1, 1.0]
@@ -95,3 +103,6 @@ evaluation:
   resolution_steps: 8
   distribution_window: 0.25
   divergence_factor: 1000.0
+  # A tenth of the signal: the level a predictor's own uncertainty is asked to warn about
+  # before the error reaches it.
+  trust_threshold: 0.1
