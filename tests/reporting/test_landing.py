@@ -321,27 +321,41 @@ class TestSections:
         assert html.escape(prose.SCHEMATIC.alt, quote=True) in page
         assert "<svg" in page
 
+    def test_the_charts_are_placed_in_their_sections(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        assert prose.TRUST_CHART.title in page
+        assert prose.DIAGNOSIS_CHART.title.format(faults=3) in page
+
+    def test_a_benchmark_the_cost_chart_cannot_draw_is_still_stated(self) -> None:
+        page = render_landing(_model(_card(cost=_ladder(_matched()))))
+
+        assert prose.COST_ASIDE_TITLE in page
+        assert prose.model_label("ensemble") in page
+
+    def test_a_chart_carries_its_legend(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        assert 'class="legend"' in page
+        assert 'class="swatch" style="background:var(--fluid)"' in page
+
+    def test_a_section_whose_chart_cannot_be_drawn_keeps_its_prose(self) -> None:
+        page = render_landing(_model())
+
+        assert prose.COST.heading in page
+        assert prose.COST_CHART.title.format(system="") not in page
+
     def test_the_findings_are_all_shown(self) -> None:
         page = render_landing(_model())
 
         for finding in prose.FINDING_LIST:
             assert finding.what in page
 
-    @pytest.mark.parametrize(
-        "placeholder",
-        [
-            prose.DRIFT_PLACEHOLDER,
-            prose.TRUST_PLACEHOLDER,
-            prose.COST_PLACEHOLDER,
-            prose.DIAGNOSIS_PLACEHOLDER,
-        ],
-    )
-    def test_every_figure_still_to_come_leaves_a_marked_gap(
-        self, placeholder: prose.Placeholder
-    ) -> None:
+    def test_the_drift_viewer_still_leaves_a_marked_gap(self) -> None:
+        # The last figure a phase has yet to draw. Every other gap is now a chart.
         page = render_landing(_model(diagnosis=_diagnosis()))
 
-        assert f'id="{placeholder.anchor}"' in page
+        assert f'id="{prose.DRIFT_PLACEHOLDER.anchor}"' in page
 
     def test_a_page_without_scores_has_no_diagnosis_section(self) -> None:
         page = render_landing(_model())

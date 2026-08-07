@@ -24,7 +24,10 @@ __all__ = [
     "ANSWER",
     "ASIDE",
     "COST",
+    "COST_ASIDE",
+    "COST_CHART",
     "DIAGNOSIS",
+    "DIAGNOSIS_CHART",
     "DIAGNOSIS_CLOSING",
     "DIAGNOSIS_TABLE",
     "DRIFT",
@@ -40,6 +43,7 @@ __all__ = [
     "SCHEMATIC",
     "TITLE",
     "TRUST",
+    "TRUST_CHART",
     "UNKNOWN_RANK",
     "WORDMARK",
     "Fault",
@@ -158,6 +162,11 @@ class Table:
 
 
 WORDMARK = "nnphysics"
+
+TIMES = "\u00d7"
+"""The multiplication sign, written once and as an escape, because the character itself is
+easily confused with the letter x in source. A ratio against the solver is stated with it
+rather than with the letter, which reads as a variable beside a number."""
 
 TITLE = "Can a neural network replace a physics simulator?"
 
@@ -298,10 +307,40 @@ TRUST = Section(
     ),
 )
 
-TRUST_PLACEHOLDER = Placeholder(
-    anchor="usable-steps-chart",
-    text="The chart of usable steps goes here.",
+TRUST_CHART = Figure(
+    title="Usable steps out of the full rollout",
+    subtitle="Higher is better. The grey track is the length of the rollout requested.",
+    alt=(
+        "Bar chart of the stretch each model stays usable for, against the full rollout "
+        "it was asked for. {summary}"
+    ),
+    caption=(
+        "**Read the grey bars first.** Doing nothing at all, returning the previous state "
+        "unchanged, matches or beats every network here on the setup it never trained on. "
+        "A surrogate that cannot clear that line has not earned its training cost."
+    ),
 )
+
+TRUST_LEGEND = ("{system}, trained on setup", "{system}, unseen setup")
+"""What the two bars of a row mean, once per system so that the colours can be told
+apart."""
+
+TRUST_BASELINE = "Repeat last state, the free baseline"
+
+TRUST_SUMMARY = "On the {system} the best model stays usable for {steps} of {total} steps."
+"""One clause of the chart's text alternative, per system."""
+
+TRUST_NOTE = (
+    "Repeat last state is the free baseline: predict no change at all. Anything below it "
+    "is not worth training. Where a row has no second bar, that model could not run on the "
+    "unseen setup at all."
+)
+
+TRUST_ROLLOUT = "rollout of {steps} steps"
+
+TRUST_NONE = "none"
+"""What a row prints where a model could not run on a split at all, rather than a zero,
+which would say it ran and was wrong immediately."""
 
 COST = Section(
     anchor="cost",
@@ -315,10 +354,68 @@ COST = Section(
     ),
 )
 
-COST_PLACEHOLDER = Placeholder(
-    anchor="cost-chart",
-    text="The chart of accuracy against time per step goes here.",
+COST_CHART = Figure(
+    title="Accuracy against time per step, {system}",
+    subtitle=(
+        "Down and to the left is better: more accurate, less time. {threads}, {trials} "
+        "timed trials."
+    ),
+    alt=(
+        "Scatter of worst error against milliseconds per step. {summary} Both are drawn "
+        "against the simulator's own quality dial, which is the real competition."
+    ),
+    caption=(
+        "**The surrogates sit above and to the right of the simulator's curve**, which is "
+        "the losing quadrant: slower and no more accurate. The {predictor} takes "
+        "{surrogate} ms per step where the simulator reaches the same accuracy in "
+        "{matched} ms. {payback}"
+    ),
 )
+
+COST_LEGEND = ("Simulator, quality dial from low to high", "Neural surrogate")
+
+COST_SUMMARY = "The {predictor} costs {surrogate} ms per step against the simulator's {matched} ms."
+"""One clause of the chart's text alternative, for the comparison it draws in full."""
+
+COST_AXES = ("worst error over the rollout", "milliseconds per step, log scale")
+"""The two axis titles, up the side and along the bottom."""
+
+COST_LADDER_ENDS = ("lowest quality", "exact, the reference")
+"""What the two ends of the simulator's quality dial are called."""
+
+COST_MATCHED = "same accuracy, {slowdown} the time"
+"""The dashed connector between a surrogate and the solver setting as accurate as it."""
+
+COST_PAYBACK = (
+    "Counting the cost of training them, the cheapest repays itself after about {rollouts} "
+    "rollouts."
+)
+
+COST_NEVER_PAYS = (
+    "Counting the cost of training them, none of them ever pays back, at any number of rollouts."
+)
+"""The two ends of the same sentence. Which one the caption carries is read from the
+benchmark, because a surrogate that never pays back and one that pays back after ten
+thousand rollouts are different results and the page must not print the kinder one."""
+
+COST_THREADS = ("One CPU thread", "{threads} CPU threads")
+
+COST_ASIDE_TITLE = "The case the chart cannot settle"
+
+COST_ASIDE = (
+    "On the {system}, the {predictor} measured {speed} the simulator's speed at matched accuracy."
+)
+
+COST_ASIDE_BOUND = (
+    "No solver setting ran both slower and less accurately than it, so that figure is a "
+    "bound rather than a measurement, and a result that straddles one is not a speedup."
+)
+
+COST_ASIDE_PAYBACK = (
+    "Even at that figure it would need about {rollouts} rollouts to repay the cost of training it."
+)
+
+COST_ASIDE_NEVER = "Counting the cost of training it, it never pays back at any number of rollouts."
 
 DIAGNOSIS = Section(
     anchor="diagnosis",
@@ -337,10 +434,32 @@ DIAGNOSIS = Section(
     ),
 )
 
-DIAGNOSIS_PLACEHOLDER = Placeholder(
-    anchor="diagnosis-chart",
-    text="The chart comparing the agent with the baseline goes here.",
+DIAGNOSIS_CHART = Figure(
+    title="Naming the true cause, over {faults} injected faults",
+    subtitle=(
+        "Each diagnoser returns the causes it thinks most likely, in order. Higher is better."
+    ),
+    alt=(
+        "Bar chart comparing the agent with the rule based baseline. {summary} Both were "
+        "given the same faults and scored by the same code."
+    ),
+    caption=(
+        "**The baseline is not a straw man.** It names whichever metric regressed most and "
+        "maps it to the cause that metric is usually about, using a table written with "
+        "knowledge of which faults were coming. It still failed to name the cause at all "
+        "in {missed} of {faults}."
+    ),
 )
+
+DIAGNOSIS_LEGEND = ("Language model agent", "Conventional rule based baseline")
+
+DIAGNOSIS_ROWS = ("Correct cause ranked first", "Correct cause in its top three")
+"""The two measures the chart draws, in the order it draws them."""
+
+DIAGNOSIS_SUMMARY = "{measure}: the agent {agent}, the baseline {baseline}."
+"""One clause of the chart's text alternative, per measure."""
+
+DIAGNOSIS_AXIS = "{faults} of {faults} faults"
 
 DIAGNOSIS_TABLE = Table(
     caption="Every fault, and where the agent ranked the true cause.",
