@@ -57,9 +57,9 @@ training:
   warmup_epochs: 2
   gradient_clip: 1.0
   patience: 10
-  # Every trajectory is still seen, at one start in two. Measured on eight cores: the
-  # operator trains in 1,941 s and the convolutional baseline, at the same parameter
-  # count, in about 5,800 s.
+  # Every trajectory is still seen, at one start in two. Measured on eight cores by summing
+  # the epoch timings in each record: the operator trains in 2,010 s and the convolutional
+  # baseline, at the same parameter count, in 5,286 s.
   window_stride: 2
   curriculum: [1, 4, 8]
   curriculum_epochs: [0, 15, 28]
