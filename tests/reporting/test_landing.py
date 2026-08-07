@@ -1,0 +1,644 @@
+from __future__ import annotations
+
+import html
+import re
+from typing import TYPE_CHECKING, Any
+
+import pytest
+
+from nnphysics.core.config import RunConfig
+from nnphysics.evals.result import (
+    MetricRecord,
+    PredictorResult,
+    RolloutRecord,
+    SuiteResult,
+    SuiteSettings,
+)
+from nnphysics.evals.speed import SpeedPoint, SpeedReport, matched_speedup
+from nnphysics.reporting import prose
+from nnphysics.reporting.environment import EnvironmentRecord
+from nnphysics.reporting.landing import LANDING_NAME, TIMES, render_landing
+from nnphysics.reporting.layout import RECORD_NAME
+from nnphysics.reporting.page import (
+    HELD_OUT_SPLIT,
+    PERSISTENCE,
+    TRAINED_ON_SPLIT,
+    USABLE_THRESHOLD,
+    CostLadder,
+    DiagnoserScore,
+    Diagnosis,
+    FaultRank,
+    Headlines,
+    Horizon,
+    MatchedCost,
+    PageModel,
+    RunCard,
+    RunVerdict,
+    VerdictKind,
+    build_page,
+)
+from nnphysics.reporting.record import RunRecord, write_record
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+DT = 0.01
+ROLLOUT_STEPS = 100
+
+CONFIG: dict[str, Any] = {
+    "name": "example",
+    "seed": 5,
+    "system": {"name": "fluid"},
+    "data": {
+        "n_trajectories": 8,
+        "n_steps": 8,
+        "dt": DT,
+        "regimes": ["hot"],
+        "held_out_regimes": ["cold"],
+        "val_fraction": 0.25,
+        "test_fraction": 0.25,
+    },
+    "model": {"name": "placeholder"},
+    "evaluation": {"name": "standard", "metrics": ["rollout_error"], "rollout_steps": 4},
+}
+
+ENVIRONMENT = EnvironmentRecord(
+    python="3.12.0",
+    implementation="CPython",
+    platform="Linux 6.1",
+    machine="x86_64",
+    cpu_count=8,
+    packages={"numpy": "2.1.0"},
+)
+"""Fixed rather than read from the machine, so the same runs root gives the same page
+everywhere."""
+
+
+def _horizon(  # noqa: PLR0913 - a horizon has ten fields and a test chooses any of them
+    predictor: str,
+    split: str,
+    *,
+    learned: bool = True,
+    steps: float | None = 25.0,
+    completed: int = 4,
+    diverged: bool = False,
+    failed: bool = False,
+) -> Horizon:
+    """One predictor on one split, with everything the page reads chosen directly."""
+    return Horizon(
+        predictor=predictor,
+        split=split,
+        learned=learned,
+        steps=steps,
+        rollout_steps=ROLLOUT_STEPS,
+        whole_rollout=False,
+        rollouts=4,
+        completed=completed,
+        diverged=diverged,
+        failed=failed,
+    )
+
+
+def _card(  # noqa: PLR0913 - a run card has a field per column of the register
+    *,
+    run_id: str = "0123456789abcdef",
+    directory: str = "fluid-0123456789abcdef",
+    system: str = "fluid",
+    created: str = "2026-01-01T00:00:00+00:00",
+    model: str | None = "convolution",
+    parameters: int | None = 1234,
+    epochs: int | None = 7,
+    fault: bool = False,
+    horizons: tuple[Horizon, ...] | None = None,
+    verdict: RunVerdict | None = None,
+    cost: CostLadder | None = None,
+) -> RunCard:
+    """One run, as the register shows it."""
+    return RunCard(
+        run_id=run_id,
+        name="example",
+        directory=directory,
+        system=system,
+        created=created,
+        commit="a" * 40,
+        model=model,
+        parameters=parameters,
+        epochs=epochs,
+        fault=fault,
+        rollout_steps=ROLLOUT_STEPS,
+        horizons=horizons
+        if horizons is not None
+        else (
+            _horizon(PERSISTENCE, TRAINED_ON_SPLIT, learned=False, steps=10.0),
+            _horizon("convolution", TRAINED_ON_SPLIT),
+        ),
+        verdict=verdict if verdict is not None else RunVerdict(VerdictKind.STABLE, "stable"),
+        cost=cost,
+    )
+
+
+def _matched(*, speedup: float = 0.5, break_even: float | None = None) -> MatchedCost:
+    """One surrogate against the cheapest solver setting as accurate as it."""
+    return MatchedCost(
+        predictor="ensemble",
+        speedup=speedup,
+        slowdown=1.0 / speedup if speedup < 1.0 else None,
+        seconds_per_step=0.002,
+        matched_seconds_per_step=0.001,
+        matched_substeps=1,
+        bracketed=True,
+        break_even_rollouts=break_even,
+    )
+
+
+def _ladder(*matched: MatchedCost) -> CostLadder:
+    """A benchmark carrying nothing but the comparisons a test needs."""
+    return CostLadder(
+        system="fluid",
+        split=TRAINED_ON_SPLIT,
+        threads=1,
+        trials=5,
+        solver=(),
+        surrogates=(),
+        matched=matched,
+    )
+
+
+def _headlines() -> Headlines:
+    """The three hero figures, chosen directly rather than selected from runs."""
+    return Headlines(
+        usable_steps=11.5,
+        usable_of=63,
+        usable_predictor="convolution",
+        usable_run_id="0123456789abcdef",
+        held_out_completed=0,
+        held_out_of=4,
+        held_out_predictor="operator",
+        held_out_run_id="0123456789abcdef",
+        slowdown=17.25,
+        slowdown_predictor="graph",
+        slowdown_run_id="0123456789abcdef",
+    )
+
+
+def _score(source: str, ranks: tuple[FaultRank, ...]) -> DiagnoserScore:
+    """One diagnoser over the faults handed to it."""
+    top1 = sum(1 for entry in ranks if entry.rank == 1)
+    top3 = sum(1 for entry in ranks if entry.rank is not None and entry.rank <= 3)
+    return DiagnoserScore(
+        source=source,
+        model=source,
+        faults=len(ranks),
+        top1=top1 / len(ranks),
+        top3=top3 / len(ranks),
+        top1_count=top1,
+        top3_count=top3,
+        ranks=ranks,
+    )
+
+
+def _diagnosis() -> Diagnosis:
+    """Both diagnosers, one fault each way."""
+    ranks = (
+        FaultRank(fault="wrong_regime", true_cause="training_regime", rank=1),
+        FaultRank(fault="no_optimiser_state", true_cause="optimiser_state", rank=3),
+        FaultRank(fault="invented_fault", true_cause="something_new", rank=None),
+    )
+    return Diagnosis(
+        agent=_score("agent", ranks),
+        baseline=_score("rule_based", ranks[:1]),
+    )
+
+
+def _model(
+    *runs: RunCard, headlines: Headlines | None = None, diagnosis: Diagnosis | None = None
+) -> PageModel:
+    """A page model carrying the runs a test needs and nothing else."""
+    return PageModel(
+        runs=runs if runs else (_card(),),
+        headlines=headlines if headlines is not None else _headlines(),
+        diagnosis=diagnosis,
+    )
+
+
+def _body(page: str) -> str:
+    """The page without its stylesheet or its script, which are not prose."""
+    return page[page.index("</style>") : page.index("<script>")]
+
+
+class TestFrame:
+    def test_the_page_is_one_html_document(self) -> None:
+        page = render_landing(_model())
+
+        assert page.startswith("<!DOCTYPE html>")
+        assert page.endswith("</html>\n")
+
+    def test_the_same_model_gives_the_same_page(self) -> None:
+        model = _model()
+
+        assert render_landing(model) == render_landing(model)
+
+    def test_the_page_references_no_host(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        assert "http://" not in page
+        assert "https://" not in page
+        assert "//" not in _body(page)
+
+    def test_every_navigation_link_reaches_a_section(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+        targets = set(re.findall(r'<section id="([^"]+)"', page))
+
+        assert set(re.findall(r'<a href="#([^"]+)"', page)) <= targets
+
+    def test_the_theme_button_starts_on_the_system_preference(self) -> None:
+        page = render_landing(_model())
+
+        assert 'matchMedia("(prefers-color-scheme: dark)")' in page
+        assert 'id="theme"' in page
+
+    def test_no_field_is_left_unfilled(self) -> None:
+        # A sentence carrying a named field the builder never fills would otherwise reach
+        # the reader with a brace in it.
+        assert not re.search(r"\{[a-z_]+\}", _body(render_landing(_model(diagnosis=_diagnosis()))))
+
+
+class TestHero:
+    def test_the_three_figures_come_from_the_model(self) -> None:
+        page = render_landing(_model())
+
+        assert "11.5 of 63" in page
+        assert "0 of 4" in page
+        assert f"17{TIMES} slower" in page
+
+    def test_a_figure_is_coloured_by_the_system_it_came_from(self) -> None:
+        page = render_landing(_model(_card(system="nbody")))
+
+        assert 'class="fig-big f-nbody"' in page
+
+    def test_a_system_with_no_colour_of_its_own_is_drawn_neutral(self) -> None:
+        page = render_landing(_model(_card(system="plasma")))
+
+        assert 'class="fig-big f-muted"' in page
+
+    def test_an_unseen_figure_of_nothing_surviving_is_drawn_as_a_failure(self) -> None:
+        page = render_landing(_model())
+
+        assert 'class="fig-big f-fail"' in page
+
+    def test_a_surviving_unseen_figure_is_not_drawn_as_a_failure(self) -> None:
+        headlines = Headlines(
+            usable_steps=11.5,
+            usable_of=63,
+            usable_predictor="convolution",
+            usable_run_id="0123456789abcdef",
+            held_out_completed=3,
+            held_out_of=4,
+            held_out_predictor="convolution",
+            held_out_run_id="0123456789abcdef",
+            slowdown=2.0,
+            slowdown_predictor="convolution",
+            slowdown_run_id="0123456789abcdef",
+        )
+        page = render_landing(_model(headlines=headlines))
+
+        assert "3 of 4" in page
+        assert page.count('class="fig-big f-fail"') == 0
+
+    def test_the_note_about_the_agent_appears_only_with_the_scores(self) -> None:
+        with_scores = render_landing(_model(diagnosis=_diagnosis()))
+        without = render_landing(_model())
+
+        assert 'class="aside-link"' in with_scores
+        assert 'class="aside-link"' not in without
+
+
+class TestSections:
+    def test_the_premise_carries_its_schematic(self) -> None:
+        page = render_landing(_model())
+
+        assert prose.SCHEMATIC.title in page
+        assert html.escape(prose.SCHEMATIC.alt, quote=True) in page
+        assert "<svg" in page
+
+    def test_the_findings_are_all_shown(self) -> None:
+        page = render_landing(_model())
+
+        for finding in prose.FINDING_LIST:
+            assert finding.what in page
+
+    @pytest.mark.parametrize(
+        "placeholder",
+        [
+            prose.DRIFT_PLACEHOLDER,
+            prose.TRUST_PLACEHOLDER,
+            prose.COST_PLACEHOLDER,
+            prose.DIAGNOSIS_PLACEHOLDER,
+        ],
+    )
+    def test_every_figure_still_to_come_leaves_a_marked_gap(
+        self, placeholder: prose.Placeholder
+    ) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        assert f'id="{placeholder.anchor}"' in page
+
+    def test_a_page_without_scores_has_no_diagnosis_section(self) -> None:
+        page = render_landing(_model())
+
+        assert 'id="diagnosis"' not in page
+        assert 'href="#diagnosis"' not in page
+
+
+class TestDiagnosisTable:
+    def test_one_row_per_fault(self) -> None:
+        diagnosis = _diagnosis()
+        page = render_landing(_model(diagnosis=diagnosis))
+        rows = page[page.index("<tbody>") : page.index("</tbody>")]
+
+        assert rows.count("<tr>") == len(diagnosis.agent.ranks)
+
+    def test_a_rank_is_written_as_a_position(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        assert ">1st<" in page
+        assert ">3rd<" in page
+
+    def test_a_cause_the_diagnoser_never_named_says_so(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        assert prose.UNKNOWN_RANK in page
+
+    def test_a_fault_with_no_curated_description_falls_back_to_its_identifiers(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        assert "Invented fault" in page
+        assert "Something new" in page
+
+
+class TestRegister:
+    def test_one_row_per_reported_run(self) -> None:
+        model = _model(_card(), _card(run_id="f" * 16, directory="fluid-ffff"))
+        page = render_landing(model)
+
+        assert page.count('class="run"') == 2
+
+    def test_a_fault_run_is_not_reported(self) -> None:
+        model = _model(_card(), _card(run_id="f" * 16, directory="fluid-fault-x-ffff", fault=True))
+        page = render_landing(model)
+
+        assert page.count('class="run"') == 1
+
+    def test_a_row_links_to_the_report_beside_it(self) -> None:
+        page = render_landing(_model())
+
+        assert 'href="fluid-0123456789abcdef/report.html"' in page
+
+    def test_rows_are_grouped_by_system(self) -> None:
+        model = _model(
+            _card(run_id="a" * 16, directory="nbody-a", system="nbody"),
+            _card(run_id="b" * 16, directory="fluid-b", system="fluid"),
+        )
+        page = render_landing(model)
+
+        assert page.index('href="fluid-b') < page.index('href="nbody-a')
+
+    def test_a_trained_run_shows_what_it_cost_to_train(self) -> None:
+        page = render_landing(_model(_card(parameters=148889, epochs=40)))
+
+        assert "148,889 parameters, 40 epochs" in page
+
+    def test_a_benchmark_run_shows_a_speed_instead_of_a_stretch(self) -> None:
+        card = _card(
+            model=None,
+            parameters=None,
+            epochs=None,
+            verdict=RunVerdict(VerdictKind.COST_BENCHMARK, "never pays back"),
+            cost=_ladder(_matched(speedup=0.06), _matched(speedup=1.3)),
+        )
+        page = render_landing(_model(card))
+
+        assert f"0.06 to 1.3{TIMES}" in page
+        assert "speed benchmark, 1 thread, 5 timed trials" in page
+
+    def test_a_run_that_trained_nothing_says_so(self) -> None:
+        card = _card(
+            model=None,
+            parameters=None,
+            epochs=None,
+            horizons=(_horizon(PERSISTENCE, TRAINED_ON_SPLIT, learned=False),),
+            verdict=RunVerdict(VerdictKind.HARNESS_CHECK, "harness check"),
+        )
+        page = render_landing(_model(card))
+
+        assert prose.NO_MODEL in page
+        assert prose.HARNESS_ROLE in page
+
+
+class TestVerdictColour:
+    def test_a_harness_check_is_stated_neutrally(self) -> None:
+        card = _card(verdict=RunVerdict(VerdictKind.HARNESS_CHECK, "harness check"))
+
+        assert 'class="status s-none"' in render_landing(_model(card))
+
+    @pytest.mark.parametrize("kind", [VerdictKind.DIVERGES, VerdictKind.CANNOT_RUN_UNSEEN])
+    def test_a_failure_is_stated_as_one(self, kind: VerdictKind) -> None:
+        card = _card(verdict=RunVerdict(kind, "diverges"))
+
+        assert 'class="status s-fail"' in render_landing(_model(card))
+
+    def test_a_benchmark_that_never_pays_back_is_a_failure(self) -> None:
+        card = _card(
+            verdict=RunVerdict(VerdictKind.COST_BENCHMARK, "never pays back"),
+            cost=_ladder(_matched(break_even=None)),
+        )
+
+        assert 'class="status s-fail"' in render_landing(_model(card))
+
+    def test_a_benchmark_that_pays_back_is_qualified_rather_than_failed(self) -> None:
+        card = _card(
+            verdict=RunVerdict(VerdictKind.COST_BENCHMARK, "pays back eventually"),
+            cost=_ladder(_matched(break_even=1000.0)),
+        )
+
+        assert 'class="status s-warn"' in render_landing(_model(card))
+
+    def test_a_model_that_clears_the_free_baseline_is_stated_as_a_result(self) -> None:
+        card = _card(
+            horizons=(
+                _horizon(PERSISTENCE, TRAINED_ON_SPLIT, learned=False, steps=10.0),
+                _horizon("convolution", TRAINED_ON_SPLIT, steps=25.0),
+            )
+        )
+
+        assert 'class="status s-good"' in render_landing(_model(card))
+
+    def test_a_model_that_does_not_clear_it_is_qualified(self) -> None:
+        card = _card(
+            horizons=(
+                _horizon(PERSISTENCE, TRAINED_ON_SPLIT, learned=False, steps=25.0),
+                _horizon("convolution", TRAINED_ON_SPLIT, steps=10.0),
+            )
+        )
+
+        assert 'class="status s-warn"' in render_landing(_model(card))
+
+
+class TestEscaping:
+    def test_a_run_name_containing_markup_reaches_the_page_as_text(self) -> None:
+        card = _card(directory="<script>alert(1)</script>", system='fluid" onclick="x')
+        page = render_landing(_model(card))
+
+        assert "<script>alert(1)</script>" not in _body(page)
+        assert "&lt;script&gt;" in page
+        assert 'onclick="x' not in page
+
+    def test_a_predictor_name_containing_markup_is_escaped(self) -> None:
+        card = _card(
+            model="<b>graph</b>",
+            horizons=(_horizon("<b>graph</b>", TRAINED_ON_SPLIT),),
+        )
+        page = render_landing(_model(card))
+
+        assert "<b>graph</b>" not in page
+        assert "&lt;b&gt;graph&lt;/b&gt;" in page
+
+    def test_curated_emphasis_still_becomes_markup(self) -> None:
+        page = render_landing(_model())
+
+        assert "<strong>not yet</strong>" in page
+
+
+def _predictor(predictor: str, split: str, *, horizon: float) -> PredictorResult:
+    """One predictor on one split of a fixture run."""
+    return PredictorResult(
+        predictor=predictor,
+        spec=predictor,
+        split=split,
+        regimes=("hot",),
+        rollouts=(
+            RolloutRecord(
+                trajectory="t0",
+                regime="hot",
+                split=split,
+                steps_requested=ROLLOUT_STEPS,
+                steps_completed=ROLLOUT_STEPS,
+                stop_reason="completed",
+                seconds=0.01,
+            ),
+        ),
+        metrics=(
+            MetricRecord(
+                name="rollout_error",
+                scalars={f"horizon.{USABLE_THRESHOLD:g}": horizon},
+            ),
+        ),
+        seconds_per_step=0.002,
+        completed=True,
+    )
+
+
+def _benchmark() -> SpeedReport:
+    """A benchmark whose surrogate loses to the solver.
+
+    Every page needs one, because the third hero figure is a slowdown and a model with no
+    slowdown to report refuses to build.
+    """
+    solver = SpeedPoint(
+        label="reference:substeps=1",
+        predictor="reference",
+        kind="solver",
+        substeps=1,
+        error=0.5,
+        seconds_per_step=0.001,
+        iqr=0.0001,
+        relative_spread=0.1,
+        stable=True,
+        completed=True,
+    )
+    surrogate = SpeedPoint(
+        label="convolution",
+        predictor="convolution",
+        kind="surrogate",
+        substeps=0,
+        error=0.5,
+        seconds_per_step=0.002,
+        iqr=0.0002,
+        relative_spread=0.1,
+        stable=True,
+        completed=True,
+    )
+    return SpeedReport(
+        system="fluid",
+        split=TRAINED_ON_SPLIT,
+        steps=ROLLOUT_STEPS,
+        n_initial_conditions=1,
+        threads=1,
+        trials=5,
+        warmup=1,
+        steps_per_trial=4,
+        dataset_substeps=1,
+        ladder=(solver,),
+        surrogates=(surrogate,),
+        matched=(matched_speedup(surrogate, (solver,)),),
+        costs=(),
+    )
+
+
+@pytest.fixture
+def runs_root(tmp_path: Path) -> Path:
+    """A runs root holding one readable run, written the way a real run writes itself."""
+    record = RunRecord(
+        run_id="0123456789abcdef",
+        name="example",
+        created="2026-01-01T00:00:00+00:00",
+        code_version="0.1.0",
+        commit="a" * 40,
+        config=RunConfig.model_validate(CONFIG),
+        environment=ENVIRONMENT,
+        timings={"evaluation": 1.5},
+        evaluation=SuiteResult(
+            code_version="0.1.0",
+            run_id="0123456789abcdef",
+            dataset_id="fedcba9876543210",
+            system="fluid",
+            seed=5,
+            settings=SuiteSettings(
+                name="standard",
+                metrics=("rollout_error",),
+                rollout_steps=ROLLOUT_STEPS,
+                n_initial_conditions=1,
+                error_thresholds=(USABLE_THRESHOLD,),
+                symmetry_steps=4,
+                distribution_window=0.25,
+                divergence_factor=1000.0,
+            ),
+            invariants={},
+            results=(
+                _predictor(PERSISTENCE, TRAINED_ON_SPLIT, horizon=0.1),
+                _predictor("convolution", TRAINED_ON_SPLIT, horizon=0.25),
+                _predictor("convolution", HELD_OUT_SPLIT, horizon=0.05),
+            ),
+        ),
+        benchmark=_benchmark(),
+    )
+    directory = tmp_path / "fluid-0123456789abcdef"
+    directory.mkdir()
+    write_record(directory / RECORD_NAME, record)
+    return tmp_path
+
+
+class TestFromARunsRoot:
+    def test_the_page_renders_from_a_runs_root(self, runs_root: Path) -> None:
+        page = render_landing(build_page(runs_root))
+
+        assert prose.TITLE in page
+        assert 'href="fluid-0123456789abcdef/report.html"' in page
+
+    def test_the_page_is_written_beside_the_runs_it_links_to(self, runs_root: Path) -> None:
+        # The links are relative to the runs root, so the file belongs in it.
+        target = runs_root / LANDING_NAME
+        target.write_text(render_landing(build_page(runs_root)), encoding="utf-8")
+
+        assert (runs_root / "fluid-0123456789abcdef").is_dir()
+        assert target.is_file()
