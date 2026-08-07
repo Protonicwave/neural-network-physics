@@ -23,7 +23,7 @@ import html
 import re
 from typing import TYPE_CHECKING
 
-from nnphysics.reporting import prose
+from nnphysics.reporting import charts, prose
 from nnphysics.reporting.page import (
     PERSISTENCE,
     TOP_ONE,
@@ -31,7 +31,7 @@ from nnphysics.reporting.page import (
     TRAINED_ON_SPLIT,
     VerdictKind,
 )
-from nnphysics.reporting.theme import landing_stylesheet
+from nnphysics.reporting.theme import css_var, landing_stylesheet
 
 if TYPE_CHECKING:
     from nnphysics.reporting.page import Diagnosis, Horizon, PageModel, RunCard
@@ -41,10 +41,9 @@ __all__ = ["LANDING_NAME", "render_landing"]
 LANDING_NAME = "index.html"
 """What the page is called in the runs root, so that serving the directory serves it."""
 
-TIMES = "\u00d7"
-"""The multiplication sign, written once and as an escape, because the character itself is
-easily confused with the letter x in source. A slowdown is stated with it rather than with
-the letter, which reads as a variable beside a number."""
+TIMES = prose.TIMES
+"""The multiplication sign. Held in `prose` so that the charts and the register state a
+ratio the same way, and re-exported here because it is what the register prints."""
 
 _TONED_SYSTEMS = frozenset({"nbody", "fluid"})
 """The systems the theme has a colour for. A system added later is drawn in the neutral
@@ -86,9 +85,9 @@ def render_landing(model: PageModel) -> str:
     """
     sections = [
         _premise(),
-        _chart_section(prose.DRIFT, prose.DRIFT_PLACEHOLDER),
-        _chart_section(prose.TRUST, prose.TRUST_PLACEHOLDER),
-        _chart_section(prose.COST, prose.COST_PLACEHOLDER),
+        _gap_section(prose.DRIFT, prose.DRIFT_PLACEHOLDER),
+        _chart_section(prose.TRUST, charts.usable_steps_chart(model)),
+        _cost(model),
     ]
     if model.diagnosis is not None:
         sections.append(_diagnosis(model.diagnosis))
@@ -280,18 +279,44 @@ def _close_section() -> str:
 
 def _premise() -> str:
     """Why the question is worth asking, and the schematic that shows it."""
-    schematic = prose.SCHEMATIC_SVG.format(alt=_escape(prose.SCHEMATIC.alt))
-    figure = (
+    schematic = charts.Chart(
+        title=prose.SCHEMATIC.title,
+        subtitle=prose.SCHEMATIC.subtitle,
+        legend=(),
+        svg=prose.SCHEMATIC_SVG.format(alt=_escape(prose.SCHEMATIC.alt)),
+        note="",
+        caption=prose.SCHEMATIC.caption,
+    )
+    return "\n".join([_open_section(prose.PREMISE), _figure(schematic), _close_section()])
+
+
+def _legend(entries: tuple[charts.Legend, ...]) -> str:
+    """What each colour in a chart means, or nothing where colour carries nothing."""
+    if not entries:
+        return ""
+    items = "".join(
+        f'<span><i class="swatch" style="background:{css_var(entry.colour)}"></i>'
+        f"{_escape(entry.label)}</span>"
+        for entry in entries
+    )
+    return f'<div class="legend">{items}</div>\n'
+
+
+def _figure(chart: charts.Chart) -> str:
+    """One chart on its card, with its title, its legend, its note and its caption."""
+    note = f'<p class="chart-note">{_inline(chart.note)}</p>\n' if chart.note else ""
+    return (
         "<figure>\n"
         '<div class="chart-card">\n'
-        f'<p class="chart-title">{_inline(prose.SCHEMATIC.title)}</p>\n'
-        f'<p class="chart-sub">{_inline(prose.SCHEMATIC.subtitle)}</p>\n'
-        f"{schematic}"
+        f'<p class="chart-title">{_inline(chart.title)}</p>\n'
+        f'<p class="chart-sub">{_inline(chart.subtitle)}</p>\n'
+        f"{_legend(chart.legend)}"
+        f"{chart.svg}"
+        f"{note}"
         "</div>\n"
-        f"<figcaption>{_inline(prose.SCHEMATIC.caption)}</figcaption>\n"
+        f"<figcaption>{_inline(chart.caption)}</figcaption>\n"
         "</figure>"
     )
-    return "\n".join([_open_section(prose.PREMISE), figure, _close_section()])
 
 
 def _gap(placeholder: prose.Placeholder) -> str:
@@ -308,17 +333,47 @@ def _gap(placeholder: prose.Placeholder) -> str:
     )
 
 
-def _chart_section(section: prose.Section, placeholder: prose.Placeholder) -> str:
+def _gap_section(section: prose.Section, placeholder: prose.Placeholder) -> str:
     """A section whose figure a later phase draws."""
     return "\n".join([_open_section(section), _gap(placeholder), _close_section()])
 
 
+def _chart_section(section: prose.Section, chart: charts.Chart | None) -> str:
+    """A section built around one chart, or its prose alone where there is none to draw."""
+    parts = [_open_section(section)]
+    if chart is not None:
+        parts.append(_figure(chart))
+    parts.append(_close_section())
+    return "\n".join(parts)
+
+
+def _cost(model: PageModel) -> str:
+    """The cost comparison, and a note on any benchmark the chart cannot draw."""
+    parts = [_open_section(prose.COST)]
+    chart = charts.cost_chart(model)
+    if chart is not None:
+        parts.append(_figure(chart))
+    asides = charts.cost_asides(model)
+    if asides:
+        sentences = "".join(f'<p class="chart-sub">{_inline(text)}</p>\n' for text in asides)
+        parts.append(
+            "<figure>\n"
+            '<div class="chart-card">\n'
+            f'<p class="chart-title">{_inline(prose.COST_ASIDE_TITLE)}</p>\n'
+            f"{sentences}"
+            "</div>\n"
+            "</figure>"
+        )
+    parts.append(_close_section())
+    return "\n".join(parts)
+
+
 def _diagnosis(diagnosis: Diagnosis) -> str:
-    """The agent, the chart that is still to come, and every fault it was scored on."""
+    """The agent, how it scored against the baseline, and every fault it was scored on."""
     header = _open_section(prose.DIAGNOSIS, faults=str(diagnosis.agent.faults))
-    gap = _gap(prose.DIAGNOSIS_PLACEHOLDER)
+    figure = _figure(charts.diagnosis_chart(diagnosis))
     closing = f'<div class="prose">\n{_paragraphs(prose.DIAGNOSIS_CLOSING)}\n</div>'
-    return "\n".join([header, gap, _fault_table(diagnosis), closing, _close_section()])
+    return "\n".join([header, figure, _fault_table(diagnosis), closing, _close_section()])
 
 
 def _fault_table(diagnosis: Diagnosis) -> str:

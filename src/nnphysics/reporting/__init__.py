@@ -11,6 +11,14 @@ records compare. Nothing in that chain reads a clock or an environment: everythi
 varies is captured once, at the edge, and written into the record.
 """
 
+from nnphysics.reporting.charts import (
+    Chart,
+    Legend,
+    cost_asides,
+    cost_chart,
+    diagnosis_chart,
+    usable_steps_chart,
+)
 from nnphysics.reporting.compare import (
     DEFAULT_THRESHOLD,
     Comparison,
@@ -114,6 +122,7 @@ __all__ = [
     "TRAINED_ON_SPLIT",
     "TYPEFACES",
     "USABLE_THRESHOLD",
+    "Chart",
     "Comparison",
     "CostLadder",
     "CostPoint",
@@ -128,6 +137,7 @@ __all__ = [
     "FaultRank",
     "Headlines",
     "Horizon",
+    "Legend",
     "MatchedCost",
     "PageModel",
     "Palette",
@@ -145,8 +155,11 @@ __all__ = [
     "build_page",
     "compare_records",
     "compare_series",
+    "cost_asides",
+    "cost_chart",
     "css_var",
     "describe_environment",
+    "diagnosis_chart",
     "explain",
     "explanations",
     "find_record",
@@ -172,5 +185,6 @@ __all__ = [
     "to_markdown",
     "token_names",
     "tokens_css",
+    "usable_steps_chart",
     "write_record",
 ]

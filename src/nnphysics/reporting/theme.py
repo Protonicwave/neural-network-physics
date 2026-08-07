@@ -392,6 +392,16 @@ figcaption strong { color: var(--ink-2); font-weight: 600; }
 }
 .chart-title { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.2rem; color: var(--ink); }
 .chart-sub { font-size: 0.84rem; color: var(--muted); margin: 0 0 1.25rem; max-width: none; }
+.chart-note { font-size: 0.8rem; color: var(--muted); margin: 1.1rem 0 0; max-width: none; }
+/* A card whose last line is prose rather than a chart should not carry the gap that
+   separates a subtitle from the drawing below it. */
+.chart-card > p:last-child { margin-bottom: 0; }
+.legend {
+  display: flex; flex-wrap: wrap; gap: 1.25rem; margin-bottom: 1rem;
+  font-size: 0.8rem; color: var(--ink-2);
+}
+.legend span { display: inline-flex; align-items: center; gap: 0.45rem; }
+.swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
 svg { display: block; max-width: 100%; height: auto; }
 .placeholder {
   border: 1px dashed var(--rule); border-radius: 8px; padding: 3rem 1.5rem;
