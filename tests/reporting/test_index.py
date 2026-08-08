@@ -5,6 +5,7 @@ from pathlib import Path
 
 from nnphysics.reporting.index import KEY_SCALARS, index_runs, summarise
 from nnphysics.reporting.layout import RECORD_NAME
+from nnphysics.reporting.page import summarise_run
 from nnphysics.reporting.record import RunRecord, write_record
 
 Factory = Callable[..., RunRecord]
@@ -42,6 +43,27 @@ class TestSummarise:
         summaries = summarise(make_record(), tmp_path, split="test")
 
         assert {entry.split for entry in summaries} == {"test"}
+
+    def test_it_carries_the_same_verdict_the_page_states(
+        self, make_record: Factory, tmp_path: Path
+    ) -> None:
+        record = make_record()
+
+        summary = summarise(record, tmp_path)[0]
+
+        assert summary.verdict == summarise_run(record, tmp_path.name).verdict.phrase
+
+    def test_it_carries_the_usable_stretch_the_page_derives(
+        self, make_record: Factory, tmp_path: Path
+    ) -> None:
+        record = make_record()
+        summary = summarise(record, tmp_path)[0]
+
+        card = summarise_run(record, tmp_path.name)
+        horizon = card.horizon(summary.predictor, summary.split)
+
+        assert horizon is not None
+        assert summary.usable == horizon.steps
 
     def test_it_labels_a_run_by_name_and_identifier(
         self, make_record: Factory, tmp_path: Path

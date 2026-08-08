@@ -7,9 +7,9 @@ Timings on this machine drift. Verifying the N-body dataset took 49 s once and 4
 either side of it, on the same data, because the first run followed a 31 MB write. Treat
 every figure below as the right order of magnitude rather than a stopwatch.
 
-The whole path is about five and a half hours, almost all of it training. Stages 1, 2 and 7
-take under four minutes together and check most of the machinery, so run those first if you
-only want to know that the repository works.
+The whole path is about five and a half hours, almost all of it training. Stages 1, 2, 7 and
+8 take under four minutes together and check most of the machinery, so run those first if
+you only want to know that the repository works.
 
 ## Stage 0: install
 
@@ -146,6 +146,23 @@ and says so at the top.
 
 Writing to `docs/results` is the default and it overwrites the committed table. Pass
 `-o <dir>` to score somewhere else.
+
+## Stage 8: the landing page, about 2 s
+
+```sh
+uv run nnp report page --root runs
+serve.bat
+```
+
+`report page` reads every run record under the root and writes `index.html` beside them.
+Every number on the page is derived from a record, and the diagnosis section is read from
+`docs/results/fault-scores.json`, so the command has to be run from the repository root to
+pick that file up. Building the page twice gives byte identical output.
+
+The page references the plots rather than embedding them, so it only works from inside the
+runs root. `serve.bat` builds it and then serves that directory on port 8000. Runs with no
+rendered report are still listed, but their links are dead until `report render` has been
+run for them.
 
 ## What will not reproduce exactly
 

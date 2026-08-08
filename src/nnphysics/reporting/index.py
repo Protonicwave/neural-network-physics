@@ -6,6 +6,11 @@ hashes nobody remembers the meaning of.
 
 A run holds one row per predictor and split, because a run is not one number. Filtering
 to a single predictor is what turns the listing back into one row per run.
+
+What a run is worth, meaning how long it stayed usable and what its answer was, is derived
+by the page model rather than again here. The listing and the landing page are two views of
+the same runs, and two definitions of a run's key numbers would disagree the first time
+either changed.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from nnphysics.reporting.explain import TIMING_METRIC
 from nnphysics.reporting.layout import find_records
+from nnphysics.reporting.page import summarise_run
 from nnphysics.reporting.record import read_record
 
 if TYPE_CHECKING:
@@ -48,6 +54,9 @@ class RunSummary:
         split: Split the numbers were measured on.
         predictor: Predictor they belong to.
         values: Key scalar to value, absent where the run has no such number.
+        usable: Stored steps this predictor stayed usable for on this split, or `None`
+            where there is nothing to report.
+        verdict: The run's answer in one phrase, the same phrase the landing page prints.
         directory: Directory the run's artefacts live in.
     """
 
@@ -59,6 +68,8 @@ class RunSummary:
     split: str
     predictor: str
     values: dict[str, float]
+    usable: float | None
+    verdict: str
     directory: Path
 
     @property
@@ -85,6 +96,7 @@ def summarise(
     Returns:
         One summary per predictor and split kept, in the order they were evaluated.
     """
+    card = summarise_run(record, directory.name)
     summaries: list[RunSummary] = []
     for entry in record.evaluation.results:
         if predictor is not None and entry.predictor != predictor:
@@ -100,6 +112,7 @@ def summarise(
                 values[f"{metric}.{key}"] = entry.scalar(metric, key)
             except KeyError:
                 continue
+        horizon = card.horizon(entry.predictor, entry.split)
         summaries.append(
             RunSummary(
                 run_id=record.run_id,
@@ -110,6 +123,8 @@ def summarise(
                 split=entry.split,
                 predictor=entry.predictor,
                 values=values,
+                usable=horizon.steps if horizon is not None else None,
+                verdict=card.verdict.phrase,
                 directory=directory,
             )
         )
