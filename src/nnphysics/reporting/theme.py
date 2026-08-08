@@ -101,20 +101,25 @@ class Typefaces:
     mono: str
 
 
+# Every value below is measured against the background it is printed on. Text tokens clear
+# 4.5 to 1 and the tokens that draw a mark, the series colours and the axis, clear 3 to 1,
+# in both themes. A test computes the ratios, so a colour picked by eye cannot be committed
+# without the arithmetic agreeing. Grid lines are exempt and deliberately faint: they are a
+# reading aid behind the marks, not a mark, and a grid at 3 to 1 competes with the data.
 LIGHT = Palette(
     plane="#f9f9f7",
     surface="#fcfcfb",
     ink="#0b0b0b",
     ink_2="#52514e",
-    muted="#898781",
+    muted="#6f6d66",
     grid="#e1e0d9",
-    axis="#c3c2b7",
+    axis="#8f8e82",
     rule="rgba(11, 11, 11, 0.10)",
     plate="#ffffff",
     nbody="#4a3aa7",
-    nbody_soft="#b6aee0",
-    fluid="#1baf7a",
-    fluid_soft="#a9e0c9",
+    nbody_soft="#9285c1",
+    fluid="#0e7a55",
+    fluid_soft="#379e76",
     fail="#d03b3b",
     warn_ink="#8a6100",
     good_ink="#006300",
@@ -127,13 +132,13 @@ DARK = Palette(
     ink_2="#c3c2b7",
     muted="#898781",
     grid="#2c2c2a",
-    axis="#383835",
+    axis="#6b6b63",
     rule="rgba(255, 255, 255, 0.10)",
     plate="#ffffff",
     nbody="#9085e9",
-    nbody_soft="#4b448c",
+    nbody_soft="#6a61b5",
     fluid="#199e70",
-    fluid_soft="#175c45",
+    fluid_soft="#3e705d",
     fail="#e66767",
     warn_ink="#d9a341",
     good_ink="#0ca30c",
@@ -319,6 +324,20 @@ figcaption { font-size: 0.86rem; color: var(--muted); padding-top: 0.9rem; max-w
 _LANDING_RULES = """\
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 a { color: inherit; }
+/* One ring for every control on the page, stated rather than left to the browser, which
+   draws it in a colour the dark theme can swallow. Stated once here so that a control
+   added to a section later cannot arrive without one. */
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--fluid); outline-offset: 2px; border-radius: 3px;
+}
+/* Off screen until it is focused. It is the first thing in the tab order, so a reader
+   driving the page from the keyboard can pass the navigation in one key press. */
+.skip {
+  position: absolute; left: -100vw; top: 0.6rem; z-index: 20;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--rule);
+  border-radius: 6px; padding: 0.5rem 0.9rem; font-size: 0.85rem; text-decoration: none;
+}
+.skip:focus { left: 1rem; }
 strong { color: var(--ink); font-weight: 600; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 /* The page reads at a narrower measure than a report, and sets it on the block rather
@@ -403,6 +422,9 @@ figcaption strong { color: var(--ink-2); font-weight: 600; }
 .legend span { display: inline-flex; align-items: center; gap: 0.45rem; }
 .swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
 svg { display: block; max-width: 100%; height: auto; }
+/* Narrower than this and the chart's own labels stop being legible, so the chart keeps its
+   width and its box scrolls instead. Chosen to fit a tablet without scrolling. */
+.chart-card > .scroller svg { min-width: 40rem; }
 
 .controls {
   display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; margin-bottom: 1.25rem;
@@ -424,10 +446,9 @@ svg { display: block; max-width: 100%; height: auto; }
 .seg button:last-child { border-radius: 0 999px 999px 0; }
 .seg button + button { border-left: 1px solid var(--rule); }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--plane); }
-/* The controls are the first thing on the page a reader drives from the keyboard, so the
-   focus ring is stated rather than left to the browser, which draws it in a colour the
-   dark theme can swallow. */
-.seg button:focus-visible { outline: 2px solid var(--fluid); outline-offset: 2px; }
+/* The ring is drawn outside the pill rather than clipped by it, because the buttons sit
+   edge to edge and an inset ring on the middle one is invisible. */
+.seg button:focus-visible { position: relative; z-index: 1; }
 
 /* The plots are drawn on white, so the plate stays white in the dark theme rather than
    inverting and leaving a light figure floating on a dark page. The shared rule dresses a
@@ -444,6 +465,13 @@ svg { display: block; max-width: 100%; height: auto; }
 .strip-note .h { font-weight: 600; color: var(--ink); display: block; margin-bottom: 0.15rem; }
 @media (max-width: 720px) { .strip-note { grid-template-columns: 1fr; gap: 0.9rem; } }
 
+/* A table of words is wider than a phone. It scrolls inside its own box rather than
+   pushing the page sideways, and the box takes focus so that the scrolling is reachable
+   from the keyboard. The table itself goes back to being a table: the shared rule makes it
+   a block to get the scrolling, and a block is not reported as a table by a screen
+   reader. */
+.scroller { overflow-x: auto; }
+.scroller table { display: table; overflow: visible; }
 /* A report right aligns every column but the first, because every one of its tables is a
    table of numbers. The page has tables of words, so alignment is asked for by the cell. */
 td:not(:first-child), th:not(:first-child) { text-align: left; font-family: var(--sans); }
@@ -464,7 +492,12 @@ td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   display: grid; grid-template-columns: 12rem 1fr; gap: 1.5rem;
 }
 .findings li:last-child { border-bottom: 1px solid var(--rule); }
-.findings .what { font-weight: 600; font-size: 0.95rem; color: var(--ink); }
+/* A heading, so that the six results can be reached by structure, dressed to sit in the
+   left column rather than to look like the section headings above it. */
+.findings .what {
+  font-family: var(--sans); font-weight: 600; font-size: 0.95rem; color: var(--ink);
+  margin: 0; line-height: 1.4; letter-spacing: 0;
+}
 .findings .why { color: var(--ink-2); font-size: 0.92rem; margin: 0; max-width: none; }
 @media (max-width: 720px) { .findings li { grid-template-columns: 1fr; gap: 0.35rem; } }
 

@@ -182,3 +182,82 @@ class TestPublicSurface:
 
     def test_the_dataclasses_are_the_token_list(self) -> None:
         assert len(token_names()) == len(fields(Palette)) + len(fields(Typefaces))
+
+
+TEXT_CONTRAST = 4.5
+"""What text has to clear against the background it is printed on."""
+
+MARK_CONTRAST = 3.0
+"""What a line or a filled shape has to clear. Lower than text because a mark is read by
+its position and its size as well as by its colour."""
+
+TEXT_TOKENS = ("ink", "ink_2", "muted", "warn_ink", "good_ink", "fail")
+"""Tokens the stylesheet prints words in."""
+
+MARK_TOKENS = ("axis", "nbody", "nbody_soft", "fluid", "fluid_soft", "fail")
+"""Tokens the charts draw a line or a bar in. `fail` is in both lists because it states a
+diverged rollout in words and draws it as a mark."""
+
+BACKGROUNDS = ("plane", "surface")
+"""What a mark or a word is ever printed on. Nothing on either artefact sits on anything
+else, and `plate` carries a rendered plot rather than any generated ink."""
+
+
+def _channel(value: int) -> float:
+    """One sRGB channel, linearised, as WCAG defines it."""
+    fraction = value / 255
+    return fraction / 12.92 if fraction <= 0.04045 else ((fraction + 0.055) / 1.055) ** 2.4
+
+
+def _luminance(colour: str) -> float:
+    """Relative luminance of a six digit hex colour."""
+    digits = colour.lstrip("#")
+    red, green, blue = (int(digits[at : at + 2], 16) for at in (0, 2, 4))
+    return 0.2126 * _channel(red) + 0.7152 * _channel(green) + 0.0722 * _channel(blue)
+
+
+def contrast(foreground: str, background: str) -> float:
+    """The WCAG contrast ratio between two colours, between 1 and 21."""
+    first, second = _luminance(foreground), _luminance(background)
+    lighter, darker = max(first, second), min(first, second)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+class TestContrast:
+    """The palettes are checked by arithmetic.
+
+    A colour picked by eye in one theme is a colour nobody checked in the other.
+    """
+
+    @pytest.mark.parametrize("palette", [LIGHT, DARK], ids=["light", "dark"])
+    @pytest.mark.parametrize("token", TEXT_TOKENS)
+    @pytest.mark.parametrize("background", BACKGROUNDS)
+    def test_text_is_readable(self, palette: Palette, token: str, background: str) -> None:
+        ratio = contrast(getattr(palette, token), getattr(palette, background))
+
+        assert ratio >= TEXT_CONTRAST, f"{token} on {background} is {ratio:.2f} to 1"
+
+    @pytest.mark.parametrize("palette", [LIGHT, DARK], ids=["light", "dark"])
+    @pytest.mark.parametrize("token", MARK_TOKENS)
+    @pytest.mark.parametrize("background", BACKGROUNDS)
+    def test_a_mark_is_visible(self, palette: Palette, token: str, background: str) -> None:
+        ratio = contrast(getattr(palette, token), getattr(palette, background))
+
+        assert ratio >= MARK_CONTRAST, f"{token} on {background} is {ratio:.2f} to 1"
+
+    @pytest.mark.parametrize("palette", [LIGHT, DARK], ids=["light", "dark"])
+    @pytest.mark.parametrize(("strong", "soft"), [("nbody", "nbody_soft"), ("fluid", "fluid_soft")])
+    def test_a_system_and_its_held_back_tone_are_distinguishable(
+        self, palette: Palette, strong: str, soft: str
+    ) -> None:
+        """The two bars of a row are the same system in two tones.
+
+        They are directly labelled as well, which is why this is not held to the ratio a
+        mark needs against the page.
+        """
+        assert contrast(getattr(palette, strong), getattr(palette, soft)) >= 1.5
+
+    def test_the_check_would_notice_a_violation(self) -> None:
+        """A metric that cannot fail is not a metric, and neither is a threshold."""
+        assert contrast("#f0f0f0", "#ffffff") < MARK_CONTRAST
+        assert contrast("#000000", "#ffffff") == pytest.approx(21.0)

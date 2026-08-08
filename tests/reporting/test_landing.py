@@ -4,6 +4,7 @@ import html
 import json
 import re
 from dataclasses import replace
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -20,7 +21,7 @@ from nnphysics.evals.result import (
 from nnphysics.evals.speed import SpeedPoint, SpeedReport, matched_speedup
 from nnphysics.reporting import prose
 from nnphysics.reporting.environment import EnvironmentRecord
-from nnphysics.reporting.landing import LANDING_NAME, TIMES, render_landing
+from nnphysics.reporting.landing import CONTENT_ID, LANDING_NAME, TIMES, render_landing
 from nnphysics.reporting.layout import RECORD_NAME
 from nnphysics.reporting.page import (
     HELD_OUT_SPLIT,
@@ -759,3 +760,95 @@ class TestFromARunsRoot:
 
         assert (runs_root / "fluid-0123456789abcdef").is_dir()
         assert target.is_file()
+
+
+class TestAccessibility:
+    """The page is navigated by structure and driven from a keyboard as well as read.
+
+    These assert on the markup because that is where the property lives. Contrast is
+    checked in the theme tests, against the tokens rather than against the page.
+    """
+
+    def test_the_first_thing_in_the_tab_order_skips_the_navigation(self) -> None:
+        page = render_landing(_model())
+        body = page[page.index("<body>") :]
+
+        assert body.index('class="skip"') < body.index("<nav")
+        assert f'href="#{CONTENT_ID}"' in page
+        assert f'<main id="{CONTENT_ID}">' in page
+
+    def test_every_section_is_named_by_its_own_heading(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+        named = re.findall(r'<section id="([^"]+)" aria-labelledby="([^"]+)"', page)
+
+        assert named
+        for anchor, heading in named:
+            assert heading == f"{anchor}-heading"
+            assert f'<h2 id="{heading}">' in page
+
+    def test_the_headings_descend_without_skipping_a_level(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+        levels = [int(level) for level in re.findall(r"<h([1-6])", page)]
+
+        assert levels[0] == 1
+        assert levels.count(1) == 1
+        for previous, level in pairwise(levels):
+            assert level <= previous + 1
+
+    def test_each_negative_result_is_a_heading(self) -> None:
+        """Six results in a list of spans cannot be reached by structure."""
+        page = render_landing(_model())
+
+        assert page.count('<h3 class="what">') == len(prose.FINDING_LIST)
+
+    def test_the_theme_button_says_what_it_does(self) -> None:
+        page = render_landing(_model())
+        light, dark = prose.THEME_BUTTON
+
+        assert f'aria-label="{prose.THEME_LABEL.format(theme=light)}"' in page
+        # The script has to correct both words when it follows the reader's system.
+        assert json.dumps(prose.THEME_LABEL.format(theme=dark)) in page
+
+    def test_a_box_that_scrolls_can_be_reached_from_the_keyboard(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+        boxes = re.findall(r'<div class="scroller"([^>]*)>', page)
+
+        assert boxes
+        for box in boxes:
+            assert 'role="region"' in box
+            assert 'tabindex="0"' in box
+            assert "aria-label" in box
+
+    def test_every_chart_drawing_sits_in_a_named_box(self) -> None:
+        page = render_landing(_model(diagnosis=_diagnosis()))
+
+        # Every drawing opens immediately inside a box, so a chart cannot be added to a
+        # section without the box that lets a narrow screen scroll it.
+        assert page.count("<svg") == page.count('"><svg')
+        assert f'aria-label="{prose.TRUST_CHART.title}"' in page
+
+    def test_the_notes_under_the_drift_image_announce_themselves(self) -> None:
+        """A picture that swaps says nothing to a reader who cannot see it.
+
+        The words beside it have to announce that they changed.
+        """
+        page = render_landing(_model(drift=_viewer()))
+
+        assert 'class="strip-note" aria-live="polite"' in page
+
+    def test_the_navigation_is_named(self) -> None:
+        page = render_landing(_model())
+
+        assert f'<nav aria-label="{prose.NAV_LABEL}"' in page
+
+    def test_a_control_carries_a_visible_focus_ring(self) -> None:
+        page = render_landing(_model(drift=_viewer()))
+
+        assert "button:focus-visible" in page
+        assert "a:focus-visible" in page
+
+    def test_motion_is_asked_for_rather_than_assumed(self) -> None:
+        page = render_landing(_model())
+
+        assert "@media (prefers-reduced-motion: no-preference)" in page
+        assert page.count("scroll-behavior") == 1
