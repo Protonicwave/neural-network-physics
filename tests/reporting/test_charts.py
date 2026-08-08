@@ -183,7 +183,9 @@ def _headlines() -> Headlines:
 
 def _model(*runs: RunCard) -> PageModel:
     """A page model carrying the runs a test needs."""
-    return PageModel(runs=runs if runs else (_card(),), headlines=_headlines(), diagnosis=None)
+    return PageModel(
+        runs=runs if runs else (_card(),), headlines=_headlines(), diagnosis=None, drift=None
+    )
 
 
 def _score(source: str, ranks: tuple[int | None, ...]) -> DiagnoserScore:

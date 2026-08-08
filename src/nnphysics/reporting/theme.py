@@ -403,10 +403,46 @@ figcaption strong { color: var(--ink-2); font-weight: 600; }
 .legend span { display: inline-flex; align-items: center; gap: 0.45rem; }
 .swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
 svg { display: block; max-width: 100%; height: auto; }
-.placeholder {
-  border: 1px dashed var(--rule); border-radius: 8px; padding: 3rem 1.5rem;
-  text-align: center; font-size: 0.86rem; color: var(--muted);
+
+.controls {
+  display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; margin-bottom: 1.25rem;
 }
+.ctrl-group { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.ctrl-label {
+  font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted);
+}
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; }
+/* The row of predictors belonging to a system the reader has not selected. Stated because
+   the display above would otherwise beat the browser's own rule for a hidden element. */
+.seg[hidden] { display: none; }
+.seg button {
+  font: inherit; font-size: 0.82rem; color: var(--ink-2); background: transparent;
+  border: 0; padding: 0.28rem 0.8rem; cursor: pointer;
+}
+.seg button:first-child { border-radius: 999px 0 0 999px; }
+.seg button:last-child { border-radius: 0 999px 999px 0; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--plane); }
+/* The controls are the first thing on the page a reader drives from the keyboard, so the
+   focus ring is stated rather than left to the browser, which draws it in a colour the
+   dark theme can swallow. */
+.seg button:focus-visible { outline: 2px solid var(--fluid); outline-offset: 2px; }
+
+/* The plots are drawn on white, so the plate stays white in the dark theme rather than
+   inverting and leaving a light figure floating on a dark page. The shared rule dresses a
+   figure's image itself; here the plate carries the border and the image sits flat on it. */
+.plate {
+  background: var(--plate); border: 1px solid var(--rule);
+  border-radius: 8px; padding: 0.75rem;
+}
+.plate img { border: 0; border-radius: 0; padding: 0; background: none; }
+.strip-note {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem;
+  margin-top: 1.25rem; font-size: 0.88rem; color: var(--ink-2);
+}
+.strip-note .h { font-weight: 600; color: var(--ink); display: block; margin-bottom: 0.15rem; }
+@media (max-width: 720px) { .strip-note { grid-template-columns: 1fr; gap: 0.9rem; } }
 
 /* A report right aligns every column but the first, because every one of its tables is a
    table of numbers. The page has tables of words, so alignment is asked for by the cell. */

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import html
+import json
 import re
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from nnphysics.core.config import RunConfig
+from nnphysics.core.errors import ConfigurationError
 from nnphysics.evals.result import (
     MetricRecord,
     PredictorResult,
@@ -27,6 +30,8 @@ from nnphysics.reporting.page import (
     CostLadder,
     DiagnoserScore,
     Diagnosis,
+    DriftFrame,
+    DriftViewer,
     FaultRank,
     Headlines,
     Horizon,
@@ -210,14 +215,45 @@ def _diagnosis() -> Diagnosis:
     )
 
 
+def _frame(
+    system: str = "fluid",
+    predictor: str = "convolution",
+    split: str = TRAINED_ON_SPLIT,
+) -> DriftFrame:
+    """One combination the drift viewer offers."""
+    return DriftFrame(
+        system=system,
+        predictor=predictor,
+        split=split,
+        image=f"{system}-0123456789abcdef/plots/{split}-state-{predictor}.png",
+        run_id="0123456789abcdef",
+    )
+
+
+def _viewer(*combinations: tuple[str, str]) -> DriftViewer:
+    """A viewer offering the predictors handed to it, on both splits."""
+    chosen = combinations if combinations else (("fluid", "convolution"), ("nbody", "graph"))
+    return DriftViewer(
+        frames=tuple(
+            _frame(system, predictor, split)
+            for system, predictor in chosen
+            for split in (TRAINED_ON_SPLIT, HELD_OUT_SPLIT)
+        )
+    )
+
+
 def _model(
-    *runs: RunCard, headlines: Headlines | None = None, diagnosis: Diagnosis | None = None
+    *runs: RunCard,
+    headlines: Headlines | None = None,
+    diagnosis: Diagnosis | None = None,
+    drift: DriftViewer | None = None,
 ) -> PageModel:
     """A page model carrying the runs a test needs and nothing else."""
     return PageModel(
         runs=runs if runs else (_card(),),
         headlines=headlines if headlines is not None else _headlines(),
         diagnosis=diagnosis,
+        drift=drift,
     )
 
 
@@ -350,12 +386,6 @@ class TestSections:
 
         for finding in prose.FINDING_LIST:
             assert finding.what in page
-
-    def test_the_drift_viewer_still_leaves_a_marked_gap(self) -> None:
-        # The last figure a phase has yet to draw. Every other gap is now a chart.
-        page = render_landing(_model(diagnosis=_diagnosis()))
-
-        assert f'id="{prose.DRIFT_PLACEHOLDER.anchor}"' in page
 
     def test_a_page_without_scores_has_no_diagnosis_section(self) -> None:
         page = render_landing(_model())
@@ -496,6 +526,79 @@ class TestVerdictColour:
         )
 
         assert 'class="status s-warn"' in render_landing(_model(card))
+
+
+class TestDriftViewer:
+    def test_the_first_combination_is_rendered_without_the_script(self) -> None:
+        # A reader whose browser ran none of the script still gets a figure and its notes.
+        page = _body(render_landing(_model(drift=_viewer())))
+
+        assert 'src="fluid-0123456789abcdef/plots/test-state-convolution.png"' in page
+        assert str(prose.drift_looking("fluid")) in html.unescape(page)
+        assert str(prose.drift_meaning("fluid", "convolution", "test")) in html.unescape(page)
+
+    def test_the_image_says_what_it_shows(self) -> None:
+        page = render_landing(_model(drift=_viewer()))
+
+        assert 'alt="The convolutional network prediction against the true Fluid' in page
+
+    def test_every_control_group_reports_one_pressed_button(self) -> None:
+        page = render_landing(_model(drift=_viewer()))
+
+        for group in ("system", "predictor", "split"):
+            pressed = re.findall(rf'data-{group}="([^"]+)" aria-pressed="true"', page)
+            assert pressed == [
+                {"system": "fluid", "predictor": "convolution", "split": "test"}[group]
+            ]
+
+    def test_the_predictors_of_the_other_system_are_written_out_and_hidden(self) -> None:
+        page = render_landing(_model(drift=_viewer()))
+
+        assert 'data-predictors="fluid">' in page
+        assert 'data-predictors="nbody" hidden>' in page
+        assert page.count('aria-labelledby="ctrl-predictor"') == 2
+        assert 'data-predictor="graph"' in page
+
+    def test_every_control_is_a_button_the_keyboard_reaches(self) -> None:
+        page = render_landing(_model(drift=_viewer()))
+        section = page[page.index('id="drift-viewer"') : page.index("</figcaption>")]
+
+        assert section.count("<button") == section.count('type="button"')
+        assert section.count("<button") == section.count("aria-pressed=")
+
+    def test_the_table_carries_every_combination_the_controls_offer(self) -> None:
+        viewer = _viewer()
+        page = render_landing(_model(drift=viewer))
+        table = json.loads(
+            re.search(r'id="drift-data">(.*?)</script>', page, re.DOTALL).group(1)  # type: ignore[union-attr]
+        )
+
+        assert set(table["frames"]) == {
+            f"{frame.system}|{frame.predictor}|{frame.split}" for frame in viewer.frames
+        }
+        assert table["first"] == ["fluid", "convolution", "test"]
+        assert table["predictors"] == {"fluid": ["convolution"], "nbody": ["graph"]}
+
+    def test_a_combination_nobody_has_written_about_refuses_to_render(self) -> None:
+        # An empty box under the image would read as a combination with nothing to say.
+        viewer = DriftViewer(frames=(_frame(system="plasma", predictor="graph"),))
+
+        with pytest.raises(ConfigurationError, match="plasma"):
+            render_landing(_model(drift=viewer))
+
+    def test_markup_in_a_path_cannot_end_the_table_early(self) -> None:
+        viewer = DriftViewer(frames=(replace(_frame(), image="</script><b>"),))
+        page = render_landing(_model(drift=viewer))
+
+        assert "</script><b>" not in _body(page)
+        assert "\\u003c/script>" in page
+
+    def test_a_page_without_a_viewer_drops_the_section_and_its_link(self) -> None:
+        page = render_landing(_model())
+
+        assert 'id="drift"' not in page
+        assert 'href="#drift"' not in page
+        assert "drift-viewer" not in page
 
 
 class TestEscaping:

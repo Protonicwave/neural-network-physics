@@ -37,6 +37,7 @@ __all__ = [
     "find_records",
     "result_name",
     "run_paths",
+    "state_plot_name",
 ]
 
 RECORD_NAME = "record.json"
@@ -82,6 +83,23 @@ def result_name(suite: str) -> str:
         The file name.
     """
     return f"evaluation-{suite}.json"
+
+
+def state_plot_name(split: str, predictor: str) -> str:
+    """Name the plot comparing one predictor's states with the true ones on one split.
+
+    Named here rather than where it is drawn, because the landing page links to the file
+    without drawing it and a second copy of the pattern would be a broken link the first
+    time either changed.
+
+    Args:
+        split: Split name.
+        predictor: Registered predictor name.
+
+    Returns:
+        The file name, inside the run's plot directory.
+    """
+    return f"{split}-state-{predictor}.png"
 
 
 @dataclass(frozen=True, slots=True)

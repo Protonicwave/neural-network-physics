@@ -31,6 +31,11 @@ __all__ = [
     "DIAGNOSIS_CLOSING",
     "DIAGNOSIS_TABLE",
     "DRIFT",
+    "DRIFT_ALT",
+    "DRIFT_CAPTION",
+    "DRIFT_CONTROLS",
+    "DRIFT_NOTES",
+    "DRIFT_SPLITS",
     "EYEBROW",
     "FINDINGS",
     "FINDING_LIST",
@@ -50,9 +55,10 @@ __all__ = [
     "Figure",
     "Finding",
     "Headline",
-    "Placeholder",
     "Section",
     "Table",
+    "drift_looking",
+    "drift_meaning",
     "fault_note",
     "model_label",
     "system_label",
@@ -91,19 +97,6 @@ class Figure:
     subtitle: str
     alt: str
     caption: str
-
-
-@dataclass(frozen=True, slots=True)
-class Placeholder:
-    """What stands where a later phase draws something.
-
-    Attributes:
-        anchor: Identifier the builder marks the gap with, so a later phase can find it.
-        text: What will go there.
-    """
-
-    anchor: str
-    text: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,16 +277,104 @@ DRIFT = Section(
     kicker="The evidence",
     heading="Watch it drift",
     paragraphs=(
-        "Both rows below start from the same state. The top row is the real simulation. "
-        "The bottom row is the neural network's prediction, fed only its own previous "
-        "output. Time runs left to right.",
+        "Every figure below starts from a state the simulator and the network agree on, "
+        "and runs forward from it. Time runs left to right. The simulator is the truth. "
+        "The network is fed only its own previous output, so its mistakes compound.",
     ),
 )
 
-DRIFT_PLACEHOLDER = Placeholder(
-    anchor="drift-viewer",
-    text="The drift viewer goes here.",
+DRIFT_CONTROLS = ("System", "Predictor", "Setup")
+"""What the three groups of buttons are called, in the order the viewer shows them."""
+
+DRIFT_SPLITS = (("test", "Trained on"), ("held_out", "Never seen"))
+"""The two setups, and what a reader is told to call them. The record's own split names
+mean nothing to somebody who has not read the harness."""
+
+DRIFT_NOTES = ("What you are looking at", "What it means")
+"""The headings of the two notes under the image."""
+
+DRIFT_ALT = "The {predictor} prediction against the true {system} simulation, {setup} setup."
+
+DRIFT_CAPTION = (
+    '**Try "Never seen".** That setup is a configuration held back from training '
+    "entirely: a shear layer for the fluid, a pair of tight binaries for N-body. It is "
+    "the honest test, because in use a surrogate meets conditions nobody trained it on."
 )
+
+_DRIFT_LOOKING = {
+    "fluid": (
+        "Vorticity, which is how fast the fluid is turning at each point. Red turns one "
+        "way, blue the other. The top row is the true flow and the bottom row is the "
+        "prediction."
+    ),
+    "nbody": (
+        "Point masses under gravity, seen from above. Filled dots are the true positions "
+        "and open circles are the predicted ones. They start on top of each other."
+    ),
+}
+
+_DRIFT_MEANING = {
+    ("fluid", "convolution", "test"): (
+        "The large structures survive, but by the end the prediction is smoother than the "
+        "truth and a faint checkerboard has appeared. It is tracking the flow while "
+        "inventing texture the physics never produced."
+    ),
+    ("fluid", "convolution", "held_out"): (
+        "It stays stable on a flow it never trained on, which none of the other networks "
+        "manage. It is still not accurate, and repeating the last state stays usable "
+        "nearly three times as long."
+    ),
+    ("fluid", "operator", "test"): (
+        "Two of the four rollouts leave the physical range altogether. That is not "
+        "degradation, it is failure, and it happens on the setup the model trained on."
+    ),
+    ("fluid", "operator", "held_out"): (
+        "All four rollouts diverge by step 28. The architecture expected to generalise "
+        "best generalised worst."
+    ),
+    ("fluid", "persistence", "test"): (
+        "The free baseline: return the state unchanged. It never diverges, and it stays "
+        "usable slightly longer than the convolutional network trained to beat it."
+    ),
+    ("fluid", "persistence", "held_out"): (
+        "On a flow that evolves slowly, returning the state unchanged is a genuinely good "
+        "answer. It beats both trained networks here."
+    ),
+    ("fluid", "noise", "test"): (
+        "A deliberately broken predictor, included so that the metrics can be checked "
+        "against something that must score badly. A metric that cannot fail is not a "
+        "metric."
+    ),
+    ("fluid", "noise", "held_out"): (
+        "The same broken predictor on the unseen flow. Every metric has to catch it, and a "
+        "test asserts that each one does."
+    ),
+    ("nbody", "graph", "test"): (
+        "The cluster keeps roughly the right size and shape, but by the end individual "
+        "bodies are visibly in the wrong places. The statistics outlast the trajectories."
+    ),
+    ("nbody", "graph", "held_out"): (
+        "Two tight binaries, a configuration no training trajectory contained. All four "
+        "rollouts leave the physical range, and nothing in the training numbers predicted "
+        "it."
+    ),
+    ("nbody", "persistence", "test"): (
+        "The free baseline: the bodies simply do not move. The graph network beats it "
+        "here, which is the one clear win in the project."
+    ),
+    ("nbody", "persistence", "held_out"): (
+        "Frozen bodies still score better than the graph network here, because the graph "
+        "network's answer has left the physical range altogether."
+    ),
+    ("nbody", "noise", "test"): (
+        "A deliberately broken predictor, included so that the metrics can be checked "
+        "against something that must score badly."
+    ),
+    ("nbody", "noise", "held_out"): (
+        "The same broken predictor on the unseen setup, as a control on the metrics rather "
+        "than on the model."
+    ),
+}
 
 TRUST = Section(
     anchor="trust",
@@ -688,6 +769,34 @@ def fault_note(fault: str, true_cause: str) -> Fault:
         fault,
         Fault(name=_sentence(fault), plain=_sentence(true_cause), hidden=False),
     )
+
+
+def drift_looking(system: str) -> str | None:
+    """Say what the reader is looking at in one system's state comparison.
+
+    Args:
+        system: The system as the record names it.
+
+    Returns:
+        The note, or `None` where the system has none. The caller decides what a missing
+        note means, because an empty note under an image is worse than not offering the
+        image at all.
+    """
+    return _DRIFT_LOOKING.get(system)
+
+
+def drift_meaning(system: str, predictor: str, split: str) -> str | None:
+    """Say what one combination shows.
+
+    Args:
+        system: The system as the record names it.
+        predictor: Registered predictor name.
+        split: Split name.
+
+    Returns:
+        The note, or `None` where the combination has none.
+    """
+    return _DRIFT_MEANING.get((system, predictor, split))
 
 
 def _sentence(identifier: str) -> str:
