@@ -42,10 +42,13 @@ __all__ = [
     "FOOTER",
     "HARNESS_ROLE",
     "HEADLINES",
+    "NAV_LABEL",
     "NAV_LINKS",
     "PREMISE",
     "RUNS",
     "SCHEMATIC",
+    "SKIP_LINK",
+    "THEME_LABEL",
     "TITLE",
     "TRUST",
     "TRUST_CHART",
@@ -156,6 +159,12 @@ class Table:
 
 WORDMARK = "nnphysics"
 
+SKIP_LINK = "Skip to content"
+
+NAV_LABEL = "Sections of this page"
+"""What the navigation is called for a reader who reaches it by structure rather than by
+seeing it."""
+
 TIMES = "\u00d7"
 """The multiplication sign, written once and as an escape, because the character itself is
 easily confused with the letter x in source. A ratio against the solver is stated with it
@@ -215,9 +224,10 @@ PREMISE = Section(
         "A physics simulator takes the current state of the world and steps it forward, "
         "over and over, following rules we know are correct. It is trustworthy and it is "
         "slow.",
-        "A neural network can learn to take the same step in a fraction of the time. But "
-        "it is an approximation, and each step is fed its own previous answer. Small "
-        "errors compound. The prediction tracks reality, then drifts, then stops meaning "
+        "A neural network can learn to take the same step in a fraction of the time. A "
+        "network standing in for a simulator this way is called a surrogate. It is an "
+        "approximation, and each step is fed its own previous answer, so small errors "
+        "compound. The prediction tracks reality, then drifts, then stops meaning "
         "anything.",
         '**So the useful question is never "is it accurate".** It is: how far can you run '
         "before it is not, does it warn you, and is it actually cheaper than running the "
@@ -279,7 +289,9 @@ DRIFT = Section(
     paragraphs=(
         "Every figure below starts from a state the simulator and the network agree on, "
         "and runs forward from it. Time runs left to right. The simulator is the truth. "
-        "The network is fed only its own previous output, so its mistakes compound.",
+        "The network is fed only its own previous output, so its mistakes compound. Where "
+        "a note says a prediction left the physical range, it means the numbers grew past "
+        "anything the physics can produce and the run was stopped.",
     ),
 )
 
@@ -351,7 +363,8 @@ _DRIFT_MEANING = {
     ),
     ("nbody", "graph", "test"): (
         "The cluster keeps roughly the right size and shape, but by the end individual "
-        "bodies are visibly in the wrong places. The statistics outlast the trajectories."
+        "bodies are visibly in the wrong places. The shape of the cluster outlasts the "
+        "paths of the bodies in it."
     ),
     ("nbody", "graph", "held_out"): (
         "Two tight binaries, a configuration no training trajectory contained. All four "
@@ -381,10 +394,11 @@ TRUST = Section(
     kicker="How far you get",
     heading="Usable for a fraction of the rollout",
     paragraphs=(
-        "A rollout is counted as usable while the prediction error stays below a tenth of "
-        "the size of the state itself. Past that the mistake is comparable to the thing "
-        "being predicted. Each bar is the length of that usable stretch, drawn against the "
-        "full rollout the model was asked for.",
+        "A rollout is one prediction run forward from a starting state, step after step, "
+        "with nothing fed in but its own last answer. It counts as usable while the error "
+        "stays below a tenth of the size of the state itself. Past that the mistake is "
+        "comparable to the thing being predicted. Each bar is the length of that usable "
+        "stretch, drawn against the full rollout the model was asked for.",
     ),
 )
 
@@ -408,8 +422,9 @@ apart."""
 
 TRUST_BASELINE = "Repeat last state, the free baseline"
 
-TRUST_SUMMARY = "On the {system} the best model stays usable for {steps} of {total} steps."
-"""One clause of the chart's text alternative, per system."""
+TRUST_SUMMARY = "{system}: the best model stays usable for {steps} of {total} steps."
+"""One clause of the chart's text alternative, per system. The system opens the clause for
+the same reason it opens `COST_ASIDE`."""
 
 TRUST_NOTE = (
     "Repeat last state is the free baseline: predict no change at all. Anything below it "
@@ -484,8 +499,11 @@ COST_THREADS = ("One CPU thread", "{threads} CPU threads")
 COST_ASIDE_TITLE = "The case the chart cannot settle"
 
 COST_ASIDE = (
-    "On the {system}, the {predictor} measured {speed} the simulator's speed at matched accuracy."
+    "The {system} benchmark puts the {predictor} at {speed} the simulator's speed, at "
+    "matched accuracy."
 )
+"""The system opens the sentence rather than sitting inside it, because a system is named
+as `N-body` and `Fluid` and a capital letter mid sentence reads as a mistake."""
 
 COST_ASIDE_BOUND = (
     "No solver setting ran both slower and less accurately than it, so that figure is a "
@@ -552,9 +570,9 @@ UNKNOWN_RANK = "not named"
 
 DIAGNOSIS_CLOSING = (
     "**The row it got wrong is the most interesting one.** On the lost optimiser state it "
-    "ranked the true cause third, arguing that the two loss curves start at the same "
-    "value, finish within half a per cent of each other and show no discontinuity where "
-    "the resume happened. That reasoning is correct. On a model this small the fault "
+    "ranked the true cause third, arguing that the two training error curves start at the "
+    "same value, finish within half a per cent of each other and show no step where the "
+    "run was resumed. That reasoning is correct. On a model this small the fault "
     "barely does anything. A test suite where every answer is findable measures the suite, "
     "not the diagnoser.",
     "One caveat stated plainly: no API credential was available, so each context was "
@@ -581,8 +599,8 @@ FINDING_LIST = (
             "A neural operator was expected to beat a plain convolutional network on the "
             "fluid. At a parameter count matched to eight parts in ten thousand and "
             "identical training settings, it lost on every accuracy measure. Its single "
-            "win, behaving consistently when the grid is refined, is real and large, and "
-            "is the only thing the spectral structure bought."
+            "win, giving nearly the same answer when the grid is made finer, is real and "
+            "large, and is the only thing its extra machinery bought."
         ),
     ),
     # docs/results.md, "What did not work": neither surrogate generalises to its held out
@@ -601,9 +619,9 @@ FINDING_LIST = (
     Finding(
         what="An ensemble did not rescue a failed model",
         why=(
-            "Averaging four networks that have all left the physical manifold gives a path "
-            "that is not on it either. It diverged a handful of steps later, which is not "
-            "a rescue."
+            "Averaging four networks that have all left the physical range gives an answer "
+            "outside it too. The average diverged a handful of steps later than the single "
+            "network, which is not a rescue."
         ),
     ),
     # docs/results.md, "What did not work": calibration can be bought with vagueness.
@@ -612,8 +630,9 @@ FINDING_LIST = (
         why=(
             "The fluid ensemble's error bars cover the truth 96 per cent of the time, "
             "while being 159 times the size of the state being predicted. That is a model "
-            "saying the answer might be anywhere. Every coverage figure in this project is "
-            "printed beside its sharpness for exactly that reason."
+            "saying the answer might be anywhere. Every figure for how often the error "
+            "bars cover the truth is printed beside how wide they had to be, for exactly "
+            "that reason."
         ),
     ),
     # docs/results.md, "What did not work": the uncertainty warns in time on one system and
@@ -621,10 +640,10 @@ FINDING_LIST = (
     Finding(
         what="Uncertainty warned too late on one of two systems",
         why=(
-            "The fluid ensemble's spread crosses the trust threshold before its error "
-            "does, which is a usable warning. The N-body ensemble's crosses after. A "
-            "surrogate that notices it has gone wrong only once it has gone wrong cannot "
-            "decide when to fall back."
+            "The fluid ensemble's stated uncertainty grows past the usable limit before "
+            "its error does, which is a warning in time to act on. The N-body ensemble's "
+            "grows past it after. A surrogate that notices it has gone wrong only once it "
+            "has gone wrong cannot decide when to hand back to the simulator."
         ),
     ),
     # docs/results.md, "What did not work": two numbers in the previous README were wrong.
@@ -670,6 +689,10 @@ FOOTER = (
 THEME_BUTTON = ("dark", "light")
 """What the theme button says in the light theme and in the dark one. It names the theme it
 switches to, not the one in use."""
+
+THEME_LABEL = "Switch to the {theme} theme"
+"""What the theme button is called. One word is enough to read beside the rest of the
+navigation and is not enough to act on when it is heard on its own."""
 
 _SYSTEMS = {"nbody": "N-body", "fluid": "Fluid"}
 

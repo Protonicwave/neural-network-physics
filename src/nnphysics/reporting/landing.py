@@ -50,6 +50,13 @@ __all__ = ["LANDING_NAME", "render_landing"]
 LANDING_NAME = "index.html"
 """What the page is called in the runs root, so that serving the directory serves it."""
 
+CONTENT_ID = "content"
+"""What the skip link jumps to, which is the start of the page's own content."""
+
+_TABLE_CAPTION_ID = "fault-table-caption"
+"""What names the scrolling box the fault table sits in, so the box is announced by what
+it holds rather than as an unnamed region."""
+
 TIMES = prose.TIMES
 """The multiplication sign. Held in `prose` so that the charts and the register state a
 ratio the same way, and re-exported here because it is what the register prints."""
@@ -67,18 +74,25 @@ _TEENS = range(10, 21)
 _THEME_SCRIPT = """\
 const root = document.documentElement;
 const button = document.getElementById("theme");
-const apply = (theme) => {
+const says = {{"light": {in_light}, "dark": {in_dark}}};
+const called = {{"light": {label_light}, "dark": {label_dark}}};
+const apply = (theme) => {{
   root.dataset.theme = theme;
-  button.textContent = theme === "dark" ? "light" : "dark";
-};
+  button.textContent = says[theme];
+  button.setAttribute("aria-label", called[theme]);
+}};
 apply(matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-button.addEventListener("click", () => {
+button.addEventListener("click", () => {{
   apply(root.dataset.theme === "dark" ? "light" : "dark");
-});
+}});
 """
 """Choose the theme the reader's system asks for, and let the button change it. The page is
 readable with the script blocked, because the light theme is the default and every section
-is already rendered."""
+is already rendered.
+
+The button says one word, which is not a name a reader hearing it out of context could act
+on, so the script keeps a full label beside it. Both come from `prose`, so the words are
+edited where the rest of the page's words are."""
 
 _DRIFT_SCRIPT = """\
 const viewer = document.getElementById("drift-viewer");
@@ -147,8 +161,19 @@ def render_landing(model: PageModel) -> str:
         sections.append(_diagnosis(model.diagnosis))
     sections.append(_findings())
     sections.append(_runs(model))
-    body = "\n".join([_nav(model), "<main>", _hero(model), *sections, "</main>", _footer()])
-    script = _THEME_SCRIPT if model.drift is None else f"{_THEME_SCRIPT}\n{_DRIFT_SCRIPT}"
+    body = "\n".join(
+        [
+            _skip(),
+            _nav(model),
+            f'<main id="{_escape(CONTENT_ID)}">',
+            _hero(model),
+            *sections,
+            "</main>",
+            _footer(),
+        ]
+    )
+    theme = _theme_script()
+    script = theme if model.drift is None else f"{theme}\n{_DRIFT_SCRIPT}"
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en-GB">\n'
@@ -169,6 +194,31 @@ def render_landing(model: PageModel) -> str:
 def _escape(text: str) -> str:
     """Anything at all, as text rather than as markup."""
     return html.escape(text, quote=True)
+
+
+def _literal(text: str) -> str:
+    """Curated text as a JavaScript string, safe to sit inside a script element.
+
+    The escape is what stops a closing tag inside a sentence from ending the script early,
+    and is the same one the drift table applies for the same reason.
+    """
+    return json.dumps(text).replace("<", "\\u003c")
+
+
+def _theme_script() -> str:
+    """The theme button's behaviour, with the words it sets taken from `prose`."""
+    in_light, in_dark = prose.THEME_BUTTON
+    return _THEME_SCRIPT.format(
+        in_light=_literal(in_light),
+        in_dark=_literal(in_dark),
+        label_light=_literal(prose.THEME_LABEL.format(theme=in_light)),
+        label_dark=_literal(prose.THEME_LABEL.format(theme=in_dark)),
+    )
+
+
+def _skip() -> str:
+    """The link past the navigation, first in the tab order and hidden until it is focused."""
+    return f'<a class="skip" href="#{_escape(CONTENT_ID)}">{_escape(prose.SKIP_LINK)}</a>'
 
 
 def _inline(text: str) -> str:
@@ -232,12 +282,15 @@ def _nav(model: PageModel) -> str:
         if not dropped.get(anchor, False)
     )
     light, _dark = prose.THEME_BUTTON
+    # The page defaults to the light theme, so the button is written out saying what it
+    # does from there. The script corrects both words if the reader's system asks for dark.
     return (
-        "<nav>\n"
+        f'<nav aria-label="{_escape(prose.NAV_LABEL)}">\n'
         '<div class="wrap">'
         f'<span class="brand">{_escape(prose.WORDMARK)}</span>'
         f'<span class="links">{links}</span>'
-        f'<button id="theme" type="button">{_escape(light)}</button>'
+        f'<button id="theme" type="button" '
+        f'aria-label="{_escape(prose.THEME_LABEL.format(theme=light))}">{_escape(light)}</button>'
         "</div>\n"
         "</nav>"
     )
@@ -323,12 +376,17 @@ def _aside(diagnosis: Diagnosis | None) -> str:
 
 
 def _open_section(section: prose.Section, **fields: str) -> str:
-    """A section, its kicker, its heading and its introduction."""
+    """A section, its kicker, its heading and its introduction.
+
+    The section names itself with its own heading, which is what makes it a landmark a
+    reader can jump to by structure rather than a box that happens to have a rule above it.
+    """
+    heading = f"{section.anchor}-heading"
     return (
-        f'<section id="{_escape(section.anchor)}">\n'
+        f'<section id="{_escape(section.anchor)}" aria-labelledby="{_escape(heading)}">\n'
         '<div class="wrap">\n'
         f'<p class="kicker">{_inline(section.kicker)}</p>\n'
-        f"<h2>{_inline(section.heading)}</h2>\n"
+        f'<h2 id="{_escape(heading)}">{_inline(section.heading)}</h2>\n'
         f'<div class="prose">\n{_paragraphs(section.paragraphs, **fields)}\n</div>'
     )
 
@@ -363,8 +421,18 @@ def _legend(entries: tuple[charts.Legend, ...]) -> str:
     return f'<div class="legend">{items}</div>\n'
 
 
+def _plain(text: str) -> str:
+    """Curated text with its emphasis removed, for an attribute rather than for the page."""
+    return _CODE.sub(r"\1", _BOLD.sub(r"\1", text))
+
+
 def _figure(chart: charts.Chart) -> str:
-    """One chart on its card, with its title, its legend, its note and its caption."""
+    """One chart on its card, with its title, its legend, its note and its caption.
+
+    The drawing sits in a box of its own that scrolls. A chart is drawn at a fixed width
+    and its own labels shrink with it, so on a narrow screen it keeps its size and the box
+    scrolls rather than the labels becoming too small to read.
+    """
     note = f'<p class="chart-note">{_inline(chart.note)}</p>\n' if chart.note else ""
     return (
         "<figure>\n"
@@ -372,7 +440,8 @@ def _figure(chart: charts.Chart) -> str:
         f'<p class="chart-title">{_inline(chart.title)}</p>\n'
         f'<p class="chart-sub">{_inline(chart.subtitle)}</p>\n'
         f"{_legend(chart.legend)}"
-        f"{chart.svg}"
+        f'<div class="scroller" role="region" tabindex="0" '
+        f'aria-label="{_escape(_plain(chart.title))}">{chart.svg}</div>\n'
         f"{note}"
         "</div>\n"
         f"<figcaption>{_inline(chart.caption)}</figcaption>\n"
@@ -542,7 +611,10 @@ def _drift(viewer: DriftViewer) -> str:
         f"{_controls(viewer)}\n"
         f'<div class="plate"><img id="drift-image" src="{_escape(first.image)}" '
         f'alt="{_escape(_alt(first))}"></div>\n'
-        '<div class="strip-note">\n'
+        # The buttons swap the picture and both notes. A reader who cannot see the picture
+        # would otherwise press a button and be told nothing changed, so the notes announce
+        # themselves. Politely, because they are a description and not a warning.
+        '<div class="strip-note" aria-live="polite">\n'
         f'<div><span class="h">{_escape(prose.DRIFT_NOTES[0])}</span>'
         f'<span id="drift-looking">{_escape(looking)}</span></div>\n'
         f'<div><span class="h">{_escape(prose.DRIFT_NOTES[1])}</span>'
@@ -604,12 +676,19 @@ def _fault_table(diagnosis: Diagnosis) -> str:
     rows = "".join(
         _fault_row(entry.fault, entry.true_cause, entry.rank) for entry in diagnosis.agent.ranks
     )
+    # The table is four columns of words and is wider than a phone. It scrolls in its own
+    # box, and the box is focusable and named, because a region that scrolls and cannot be
+    # reached from the keyboard hides its last column from anyone not using a mouse.
     return (
+        f'<div class="scroller" role="region" tabindex="0" '
+        f'aria-labelledby="{_escape(_TABLE_CAPTION_ID)}">'
         "<table>"
-        f"<caption>{_inline(prose.DIAGNOSIS_TABLE.caption)}</caption>"
+        f'<caption id="{_escape(_TABLE_CAPTION_ID)}">'
+        f"{_inline(prose.DIAGNOSIS_TABLE.caption)}</caption>"
         f"<thead><tr>{headers}</tr></thead>"
         f"<tbody>{rows}</tbody>"
         "</table>"
+        "</div>"
     )
 
 
@@ -640,7 +719,7 @@ def _findings() -> str:
     """The negative results, kept rather than compressed."""
     items = "\n".join(
         "<li>"
-        f'<span class="what">{_inline(finding.what)}</span>'
+        f'<h3 class="what">{_inline(finding.what)}</h3>'
         f'<p class="why">{_inline(finding.why)}</p>'
         "</li>"
         for finding in prose.FINDING_LIST
