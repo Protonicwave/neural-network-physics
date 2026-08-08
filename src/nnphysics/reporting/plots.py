@@ -24,6 +24,7 @@ import numpy as np
 
 from nnphysics.evals.predictors import REFERENCE_NAME
 from nnphysics.reporting.explain import explain
+from nnphysics.reporting.layout import state_plot_name
 from nnphysics.reporting.style import REFERENCE_COLOUR, colour, figure, label_axes, save
 
 if TYPE_CHECKING:
@@ -551,7 +552,7 @@ def render_plots(
         for snapshot in snapshots.snapshots if snapshots else ():
             if snapshot.split != split:
                 continue
-            record = snapshot_plot(snapshot, directory / f"{split}-state-{snapshot.predictor}.png")
+            record = snapshot_plot(snapshot, directory / state_plot_name(split, snapshot.predictor))
             if record is not None:
                 records.append(record)
     if benchmark is not None:

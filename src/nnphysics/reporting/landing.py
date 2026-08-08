@@ -20,9 +20,11 @@ stays text.
 from __future__ import annotations
 
 import html
+import json
 import re
 from typing import TYPE_CHECKING
 
+from nnphysics.core.errors import ConfigurationError
 from nnphysics.reporting import charts, prose
 from nnphysics.reporting.page import (
     PERSISTENCE,
@@ -34,7 +36,14 @@ from nnphysics.reporting.page import (
 from nnphysics.reporting.theme import css_var, landing_stylesheet
 
 if TYPE_CHECKING:
-    from nnphysics.reporting.page import Diagnosis, Horizon, PageModel, RunCard
+    from nnphysics.reporting.page import (
+        Diagnosis,
+        DriftFrame,
+        DriftViewer,
+        Horizon,
+        PageModel,
+        RunCard,
+    )
 
 __all__ = ["LANDING_NAME", "render_landing"]
 
@@ -67,9 +76,55 @@ button.addEventListener("click", () => {
   apply(root.dataset.theme === "dark" ? "light" : "dark");
 });
 """
-"""The whole of the page's behaviour so far: choose the theme the reader's system asks for,
-and let the button change it. The page is readable with the script blocked, because the
-light theme is the default and every section is already rendered."""
+"""Choose the theme the reader's system asks for, and let the button change it. The page is
+readable with the script blocked, because the light theme is the default and every section
+is already rendered."""
+
+_DRIFT_SCRIPT = """\
+const viewer = document.getElementById("drift-viewer");
+const table = JSON.parse(document.getElementById("drift-data").textContent);
+const image = document.getElementById("drift-image");
+const looking = document.getElementById("drift-looking");
+const meaning = document.getElementById("drift-meaning");
+let [system, predictor, split] = table.first;
+const press = (attribute, value) => {
+  for (const button of viewer.querySelectorAll("[data-" + attribute + "]")) {
+    button.setAttribute("aria-pressed", String(button.dataset[attribute] === value));
+  }
+};
+const show = () => {
+  for (const group of viewer.querySelectorAll("[data-predictors]")) {
+    group.hidden = group.dataset.predictors !== system;
+  }
+  press("system", system);
+  press("predictor", predictor);
+  press("split", split);
+  const frame = table.frames[[system, predictor, split].join("|")];
+  image.src = frame.image;
+  image.alt = frame.alt;
+  looking.textContent = frame.looking;
+  meaning.textContent = frame.meaning;
+};
+viewer.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (button === null) {
+    return;
+  }
+  if (button.dataset.system !== undefined) {
+    system = button.dataset.system;
+    predictor = table.predictors[system][0];
+  } else if (button.dataset.predictor !== undefined) {
+    predictor = button.dataset.predictor;
+  } else {
+    split = button.dataset.split;
+  }
+  show();
+});
+"""
+"""The whole of the drift viewer's behaviour: swap an image and two blocks of text from a
+table written into the page. One listener on the card rather than one per button, and no
+call for anything the page did not already carry. The section is readable without it,
+because the first combination is rendered into the markup."""
 
 
 def render_landing(model: PageModel) -> str:
@@ -83,17 +138,17 @@ def render_landing(model: PageModel) -> str:
         runs root: no font, no script and no stylesheet from a host, and only relative
         paths to the reports and the plots beside it.
     """
-    sections = [
-        _premise(),
-        _gap_section(prose.DRIFT, prose.DRIFT_PLACEHOLDER),
-        _chart_section(prose.TRUST, charts.usable_steps_chart(model)),
-        _cost(model),
-    ]
+    sections = [_premise()]
+    if model.drift is not None:
+        sections.append(_drift(model.drift))
+    sections.append(_chart_section(prose.TRUST, charts.usable_steps_chart(model)))
+    sections.append(_cost(model))
     if model.diagnosis is not None:
         sections.append(_diagnosis(model.diagnosis))
     sections.append(_findings())
     sections.append(_runs(model))
     body = "\n".join([_nav(model), "<main>", _hero(model), *sections, "</main>", _footer()])
+    script = _THEME_SCRIPT if model.drift is None else f"{_THEME_SCRIPT}\n{_DRIFT_SCRIPT}"
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en-GB">\n'
@@ -105,7 +160,7 @@ def render_landing(model: PageModel) -> str:
         "</head>\n"
         "<body>\n"
         f"{body}\n"
-        f"<script>\n{_THEME_SCRIPT}</script>\n"
+        f"<script>\n{script}</script>\n"
         "</body>\n"
         "</html>\n"
     )
@@ -165,10 +220,16 @@ def _ordinal(position: int) -> str:
 
 def _nav(model: PageModel) -> str:
     """The sticky navigation, the wordmark and the theme button."""
+    # A link to a section that was not rendered is a broken link, so the two sections the
+    # page can be built without take their links with them.
+    dropped = {
+        prose.DIAGNOSIS.anchor: model.diagnosis is None,
+        prose.DRIFT.anchor: model.drift is None,
+    }
     links = "".join(
         f'<a href="#{_escape(anchor)}">{_escape(label)}</a>'
         for anchor, label in prose.NAV_LINKS
-        if anchor != prose.DIAGNOSIS.anchor or model.diagnosis is not None
+        if not dropped.get(anchor, False)
     )
     light, _dark = prose.THEME_BUTTON
     return (
@@ -319,23 +380,180 @@ def _figure(chart: charts.Chart) -> str:
     )
 
 
-def _gap(placeholder: prose.Placeholder) -> str:
-    """Where a later phase draws a figure.
+def _split_label(split: str) -> str:
+    """Name a split as the reader knows it.
 
-    Marked with an identifier so that phase can find it rather than search the markup for
-    a sentence.
+    Returns:
+        The reader's name for it, or the record's own name where there is no curated one,
+        which is the same fallback the page makes for a system or a model.
     """
-    return (
-        "<figure>\n"
-        f'<div class="placeholder" id="{_escape(placeholder.anchor)}">'
-        f"{_inline(placeholder.text)}</div>\n"
-        "</figure>"
+    return dict(prose.DRIFT_SPLITS).get(split, split)
+
+
+def _control_label(text: str) -> str:
+    """A curated name as a button says it.
+
+    The names are written for the middle of a sentence, which is where the rest of the
+    page uses them. A button is not in a sentence.
+    """
+    return text[:1].upper() + text[1:]
+
+
+def _notes(frame: DriftFrame) -> tuple[str, str]:
+    """What one combination is a picture of, and what it means.
+
+    Raises:
+        ConfigurationError: If either note is missing. The viewer offers a control for
+            every combination it carries, so a combination nobody has written about would
+            reach the reader as an empty box below the image.
+    """
+    looking = prose.drift_looking(frame.system)
+    meaning = prose.drift_meaning(frame.system, frame.predictor, frame.split)
+    missing = [
+        name for name, note in (("looking at", looking), ("meaning", meaning)) if note is None
+    ]
+    if looking is None or meaning is None:
+        raise ConfigurationError(
+            f"the drift viewer offers {frame.system}, {frame.predictor} on {frame.split} "
+            f"with no note saying what it is {' and no note saying what it '.join(missing)}"
+        )
+    return looking, meaning
+
+
+def _alt(frame: DriftFrame) -> str:
+    """What one combination's image shows, for a reader who cannot see it."""
+    return prose.DRIFT_ALT.format(
+        predictor=prose.model_label(frame.predictor),
+        system=prose.system_label(frame.system),
+        setup=_split_label(frame.split).lower(),
     )
 
 
-def _gap_section(section: prose.Section, placeholder: prose.Placeholder) -> str:
-    """A section whose figure a later phase draws."""
-    return "\n".join([_open_section(section), _gap(placeholder), _close_section()])
+def _drift_table(viewer: DriftViewer) -> str:
+    """Every combination, as the data the script swaps between.
+
+    Written into the page as JSON rather than fetched, because the page is one file served
+    from the directory it points at and has nothing to fetch from. The escape stops a
+    closing tag inside a sentence from ending the block early.
+    """
+    first = viewer.frames[0]
+    table = {
+        "first": [first.system, first.predictor, first.split],
+        "predictors": {system: viewer.predictors(system) for system in viewer.systems},
+        "frames": {
+            f"{frame.system}|{frame.predictor}|{frame.split}": _entry(frame)
+            for frame in viewer.frames
+        },
+    }
+    return json.dumps(table, indent=None, sort_keys=True).replace("<", "\\u003c")
+
+
+def _entry(frame: DriftFrame) -> dict[str, str]:
+    """Everything the script sets when the reader selects one combination."""
+    looking, meaning = _notes(frame)
+    return {"image": frame.image, "alt": _alt(frame), "looking": looking, "meaning": meaning}
+
+
+def _button(attribute: str, value: str, label: str, *, pressed: bool) -> str:
+    """One button of one control group."""
+    return (
+        f'<button type="button" data-{_escape(attribute)}="{_escape(value)}" '
+        f'aria-pressed="{"true" if pressed else "false"}">{_escape(label)}</button>'
+    )
+
+
+def _group(label: str, segments: str) -> str:
+    """One control group: what it selects, and the buttons that select it."""
+    return (
+        '<div class="ctrl-group">'
+        f'<span class="ctrl-label" id="ctrl-{_escape(label.lower())}">{_escape(label)}</span>'
+        f"{segments}"
+        "</div>"
+    )
+
+
+def _segment(label: str, buttons: str, *, system: str = "", hidden: bool = False) -> str:
+    """One row of buttons, named for assistive technology by the label beside it.
+
+    A row belonging to one system carries its name, so that the script can show the row
+    for the system the reader has selected and hide the rest.
+    """
+    belongs = f' data-predictors="{_escape(system)}"' if system else ""
+    return (
+        f'<span class="seg" role="group" aria-labelledby="ctrl-{_escape(label.lower())}"'
+        f"{belongs}{' hidden' if hidden else ''}>{buttons}</span>"
+    )
+
+
+def _controls(viewer: DriftViewer) -> str:
+    """The three groups of buttons: system, predictor and setup."""
+    system_label, predictor_label, setup_label = prose.DRIFT_CONTROLS
+    first = viewer.frames[0]
+    systems = _segment(
+        system_label,
+        "".join(
+            _button("system", system, prose.system_label(system), pressed=system == first.system)
+            for system in viewer.systems
+        ),
+    )
+    # One row of predictors per system, all written out and every row but the selected
+    # system's hidden. Building them in the script instead would leave the group empty for
+    # a reader whose browser ran none of it.
+    predictors = "".join(
+        _segment(
+            predictor_label,
+            "".join(
+                _button(
+                    "predictor",
+                    predictor,
+                    _control_label(prose.model_label(predictor)),
+                    pressed=system == first.system and predictor == first.predictor,
+                )
+                for predictor in viewer.predictors(system)
+            ),
+            system=system,
+            hidden=system != first.system,
+        )
+        for system in viewer.systems
+    )
+    splits = _segment(
+        setup_label,
+        "".join(
+            _button("split", split, _split_label(split), pressed=split == first.split)
+            for split in viewer.splits
+        ),
+    )
+    return (
+        '<div class="controls">\n'
+        f"{_group(system_label, systems)}\n"
+        f"{_group(predictor_label, predictors)}\n"
+        f"{_group(setup_label, splits)}\n"
+        "</div>"
+    )
+
+
+def _drift(viewer: DriftViewer) -> str:
+    """The section that lets a reader watch a prediction come apart."""
+    first = viewer.frames[0]
+    looking, meaning = _notes(first)
+    figure = (
+        "<figure>\n"
+        '<div class="chart-card" id="drift-viewer">\n'
+        f"{_controls(viewer)}\n"
+        f'<div class="plate"><img id="drift-image" src="{_escape(first.image)}" '
+        f'alt="{_escape(_alt(first))}"></div>\n'
+        '<div class="strip-note">\n'
+        f'<div><span class="h">{_escape(prose.DRIFT_NOTES[0])}</span>'
+        f'<span id="drift-looking">{_escape(looking)}</span></div>\n'
+        f'<div><span class="h">{_escape(prose.DRIFT_NOTES[1])}</span>'
+        f'<span id="drift-meaning">{_escape(meaning)}</span></div>\n'
+        "</div>\n"
+        f'<script type="application/json" id="drift-data">{_drift_table(viewer)}</script>\n'
+        "</div>\n"
+        f"<figcaption>{_inline(prose.DRIFT_CAPTION)}</figcaption>\n"
+        "</figure>"
+    )
+    return "\n".join([_open_section(prose.DRIFT), figure, _close_section()])
 
 
 def _chart_section(section: prose.Section, chart: charts.Chart | None) -> str:

@@ -35,6 +35,7 @@ from nnphysics.reporting.layout import (
     HTML_NAME,
     PLOTS_DIR,
     find_records,
+    state_plot_name,
 )
 from nnphysics.reporting.record import read_record
 
@@ -48,15 +49,20 @@ if TYPE_CHECKING:
 __all__ = [
     "HARNESS_PREDICTORS",
     "HELD_OUT_SPLIT",
+    "NOISE",
     "PERSISTENCE",
     "TOP_ONE",
     "TOP_THREE",
     "TRAINED_ON_SPLIT",
     "USABLE_THRESHOLD",
+    "VIEWER_BASELINES",
+    "VIEWER_SPLITS",
     "CostLadder",
     "CostPoint",
     "DiagnoserScore",
     "Diagnosis",
+    "DriftFrame",
+    "DriftViewer",
     "FaultRank",
     "Headlines",
     "Horizon",
@@ -66,6 +72,7 @@ __all__ = [
     "RunVerdict",
     "VerdictKind",
     "build_page",
+    "build_viewer",
     "read_fault_scores",
     "summarise_run",
 ]
@@ -92,6 +99,20 @@ PERSISTENCE = "persistence"
 """The free baseline: return the input unchanged. The page draws it beside every
 surrogate because a surrogate that cannot beat doing nothing has not earned its training
 cost. A test pins this to the predictor's own name so the two cannot drift."""
+
+NOISE = "noise"
+"""The deliberately broken sentinel: return the state plus noise. The drift viewer offers
+it because a reader who has seen what a metric catches has a reason to believe the metric.
+A test pins this to the predictor's own name."""
+
+VIEWER_BASELINES = (PERSISTENCE, NOISE)
+"""The harness predictors the drift viewer offers beside the learned models: the free
+baseline the surrogate has to beat, and one predictor that is wrong on purpose. Everything
+else the harness supplies is either the truth itself or a variation on those two, and a
+control with fourteen entries is a control nobody uses."""
+
+VIEWER_SPLITS = (TRAINED_ON_SPLIT, HELD_OUT_SPLIT)
+"""The two setups the viewer switches between, in the order it offers them."""
 
 HARNESS_PREDICTORS = frozenset({REFERENCE_NAME, *BROKEN_PREDICTORS, *UNCERTAIN_PREDICTORS})
 """Everything the evaluation harness supplies itself: the reference solver, the baselines,
@@ -393,6 +414,81 @@ class Diagnosis:
 
 
 @dataclass(frozen=True, slots=True)
+class DriftFrame:
+    """One combination the drift viewer offers, and the plot it shows.
+
+    Attributes:
+        system: System the rollout was run on.
+        predictor: Registered predictor name.
+        split: Split the initial conditions came from.
+        image: Path to the state comparison plot, relative to the runs root.
+        run_id: The run that drew it, so the page can say where the picture came from.
+    """
+
+    system: str
+    predictor: str
+    split: str
+    image: str
+    run_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class DriftViewer:
+    """Every combination of system, predictor and split the reader can select.
+
+    Built from the plots that exist rather than from the plots a run should have drawn, so
+    a control the page offers always resolves to a file. Every predictor offered has a
+    frame on every split, because the three controls are independent and a reader may
+    combine them in any order.
+
+    Attributes:
+        frames: One per combination, ordered by system, then predictor, then split. The
+            first is what the page renders before any button is pressed.
+    """
+
+    frames: tuple[DriftFrame, ...]
+
+    @property
+    def systems(self) -> tuple[str, ...]:
+        """The systems the viewer offers, in the order it offers them."""
+        return tuple(dict.fromkeys(frame.system for frame in self.frames))
+
+    @property
+    def splits(self) -> tuple[str, ...]:
+        """The splits the viewer offers, in the order it offers them."""
+        return tuple(dict.fromkeys(frame.split for frame in self.frames))
+
+    def predictors(self, system: str) -> tuple[str, ...]:
+        """The predictors the viewer offers for one system.
+
+        Args:
+            system: The system as the record names it.
+
+        Returns:
+            The predictor names, in the order the viewer offers them.
+        """
+        return tuple(
+            dict.fromkeys(frame.predictor for frame in self.frames if frame.system == system)
+        )
+
+    def frame(self, system: str, predictor: str, split: str) -> DriftFrame | None:
+        """Look up one combination.
+
+        Args:
+            system: The system as the record names it.
+            predictor: Registered predictor name.
+            split: Split name.
+
+        Returns:
+            The frame, or `None` if the viewer does not offer that combination.
+        """
+        for frame in self.frames:
+            if (frame.system, frame.predictor, frame.split) == (system, predictor, split):
+                return frame
+        return None
+
+
+@dataclass(frozen=True, slots=True)
 class PageModel:
     """Everything the landing page shows.
 
@@ -400,11 +496,14 @@ class PageModel:
         runs: One per run under the runs root, oldest first and ties broken by identifier.
         headlines: The three figures in the hero.
         diagnosis: What the two diagnosers scored, or `None` when no scores were supplied.
+        drift: What the drift viewer can show, or `None` when no run drew a state
+            comparison the viewer could offer.
     """
 
     runs: tuple[RunCard, ...]
     headlines: Headlines
     diagnosis: Diagnosis | None
+    drift: DriftViewer | None
 
     @property
     def reported(self) -> tuple[RunCard, ...]:
@@ -738,6 +837,77 @@ def _headlines(runs: tuple[RunCard, ...]) -> Headlines:
     )
 
 
+def _drawn(run: RunCard, predictor: str, split: str, root: Path) -> str | None:
+    """The state comparison one run drew for one predictor on one split, if it is usable.
+
+    A rollout that failed on every attempt still leaves a plot behind: the drawing code is
+    handed the initial state and draws that one frame. It shows the prediction sitting
+    exactly on the truth, which is the opposite of what this section is for, so a split the
+    predictor never ran on is treated as having no plot at all.
+    """
+    horizon = run.horizon(predictor, split)
+    if horizon is None or horizon.failed:
+        return None
+    name = state_plot_name(split, predictor)
+    if not (root / run.directory / PLOTS_DIR / name).is_file():
+        return None
+    return f"{run.plots}/{name}"
+
+
+def _source(runs: tuple[RunCard, ...], predictor: str, split: str, root: Path) -> DriftFrame | None:
+    """Which run's plot the viewer shows for one predictor on one split.
+
+    The run that trained the predictor, if one did, because a picture of a model belongs
+    to the run that produced it. Otherwise the most recent run that drew it, so that a
+    baseline is shown as the latest dataset and drawing code produce it rather than as some
+    earlier run happened to.
+    """
+    newest_first = tuple(reversed(runs))
+    for run in sorted(newest_first, key=lambda run: run.model != predictor):
+        image = _drawn(run, predictor, split, root)
+        if image is not None:
+            return DriftFrame(
+                system=run.system,
+                predictor=predictor,
+                split=split,
+                image=image,
+                run_id=run.run_id,
+            )
+    return None
+
+
+def _offered(runs: tuple[RunCard, ...]) -> tuple[str, ...]:
+    """Which predictors one system's runs could offer, in the order the viewer offers them.
+
+    The learned models first, because they are what the reader came for, then the two
+    harness predictors that give the comparison its meaning.
+    """
+    learned = sorted({entry.predictor for run in runs for entry in run.horizons if entry.learned})
+    return tuple(dict.fromkeys([*learned, *VIEWER_BASELINES]))
+
+
+def build_viewer(runs: tuple[RunCard, ...], root: Path) -> DriftViewer | None:
+    """Work out what the drift viewer can show.
+
+    Args:
+        runs: The runs the page reports on, oldest first.
+        root: The runs root the plots sit under.
+
+    Returns:
+        The viewer, or `None` if no predictor has a plot on every split. A viewer offering
+        a control that cannot be combined with another is worse than no viewer, so a
+        predictor missing one split is dropped rather than half offered.
+    """
+    frames: list[DriftFrame] = []
+    for system in sorted({run.system for run in runs}):
+        of_system = tuple(run for run in runs if run.system == system)
+        for predictor in _offered(of_system):
+            found = [_source(of_system, predictor, split, root) for split in VIEWER_SPLITS]
+            if all(frame is not None for frame in found):
+                frames.extend(frame for frame in found if frame is not None)
+    return DriftViewer(frames=tuple(frames)) if frames else None
+
+
 def build_page(root: Path, *, scores: Path | None = None) -> PageModel:
     """Derive everything the landing page shows from a runs root.
 
@@ -762,4 +932,5 @@ def build_page(root: Path, *, scores: Path | None = None) -> PageModel:
         runs=runs,
         headlines=_headlines(runs),
         diagnosis=read_fault_scores(scores) if scores is not None else None,
+        drift=build_viewer(tuple(run for run in runs if not run.fault), root),
     )

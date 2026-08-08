@@ -8,6 +8,7 @@ import pytest
 from nnphysics.core.config import RunConfig
 from nnphysics.core.errors import ConfigurationError
 from nnphysics.evals.metrics import NEVER_REACHED
+from nnphysics.evals.predictors import BROKEN_PREDICTORS
 from nnphysics.evals.predictors.broken import Persistence
 from nnphysics.evals.result import (
     MetricRecord,
@@ -24,20 +25,24 @@ from nnphysics.evals.speed import (
     SpeedReport,
 )
 from nnphysics.reporting.environment import EnvironmentRecord
-from nnphysics.reporting.layout import RECORD_NAME
+from nnphysics.reporting.layout import PLOTS_DIR, RECORD_NAME, find_records, state_plot_name
 from nnphysics.reporting.page import (
     HARNESS_PREDICTORS,
     HELD_OUT_SPLIT,
+    NOISE,
     PERSISTENCE,
     TRAINED_ON_SPLIT,
     USABLE_THRESHOLD,
+    VIEWER_BASELINES,
+    DriftViewer,
     PageModel,
     VerdictKind,
     build_page,
+    build_viewer,
     read_fault_scores,
     summarise_run,
 )
-from nnphysics.reporting.record import RunRecord, write_record
+from nnphysics.reporting.record import RunRecord, read_record, write_record
 from nnphysics.training.history import EpochRecord, TrainingHistory
 
 if TYPE_CHECKING:
@@ -285,6 +290,40 @@ def _write(root: Path, directory: str, record: RunRecord) -> None:
 def _page(root: Path) -> PageModel:
     """Build a page from a runs root with no diagnosis section."""
     return build_page(root)
+
+
+def _draw(root: Path, directory: str, *combinations: tuple[str, str]) -> None:
+    """Put a state comparison plot where a run keeps it, for each combination named."""
+    plots = root / directory / PLOTS_DIR
+    plots.mkdir(parents=True, exist_ok=True)
+    for split, predictor in combinations:
+        (plots / state_plot_name(split, predictor)).write_bytes(b"")
+
+
+def _both(predictor: str) -> tuple[tuple[str, str], ...]:
+    """The combinations a predictor needs a plot for before the viewer will offer it."""
+    return ((TRAINED_ON_SPLIT, predictor), (HELD_OUT_SPLIT, predictor))
+
+
+def _viewer(root: Path) -> DriftViewer | None:
+    """What a runs root's drift viewer can show.
+
+    Built the way the page builds it, from the runs it reports on in the order it reports
+    them, rather than through `build_page`, which would also demand the hero figures.
+    """
+    cards = sorted(
+        (summarise_run(read_record(path), path.parent.name) for path in find_records(root)),
+        key=lambda card: (card.created, card.run_id),
+    )
+    return build_viewer(tuple(card for card in cards if not card.fault), root)
+
+
+def _offering(root: Path) -> tuple[tuple[str, str, str], ...]:
+    """What a runs root's viewer offers, as one tuple per combination."""
+    viewer = _viewer(root)
+    if viewer is None:
+        return ()
+    return tuple((frame.system, frame.predictor, frame.split) for frame in viewer.frames)
 
 
 class TestHarnessPredictors:
@@ -899,3 +938,145 @@ class TestFaultScores:
         assert page.diagnosis is not None
         assert page.diagnosis.agent.source == "agent"
         assert page.diagnosis.baseline.source == "rule_based"
+
+
+class TestDriftViewer:
+    def test_the_sentinel_is_named_as_the_predictor_names_itself(self) -> None:
+        assert NOISE in BROKEN_PREDICTORS
+        assert set(VIEWER_BASELINES) <= HARNESS_PREDICTORS
+
+    def test_a_predictor_with_a_plot_on_every_split_is_offered(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+        _draw(tmp_path, "a-1", *_both("graph"), *_both(PERSISTENCE))
+
+        assert _offering(tmp_path) == (
+            ("toy", "graph", TRAINED_ON_SPLIT),
+            ("toy", "graph", HELD_OUT_SPLIT),
+            ("toy", PERSISTENCE, TRAINED_ON_SPLIT),
+            ("toy", PERSISTENCE, HELD_OUT_SPLIT),
+        )
+
+    def test_a_predictor_with_a_plot_on_one_split_only_is_left_out(self, tmp_path: Path) -> None:
+        # The three controls are independent, so a predictor the reader cannot combine
+        # with either setup is not a predictor the reader can be offered.
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+        _draw(tmp_path, "a-1", (TRAINED_ON_SPLIT, "graph"), *_both(PERSISTENCE))
+
+        assert {predictor for _, predictor, _ in _offering(tmp_path)} == {PERSISTENCE}
+
+    def test_a_split_the_predictor_never_ran_on_is_left_out(self, tmp_path: Path) -> None:
+        # A rollout that failed at the first step still leaves a plot of the initial state
+        # behind, and a plot of the prediction sitting on the truth shows no drift at all.
+        results = (
+            _predictor(PERSISTENCE, TRAINED_ON_SPLIT, horizon=0.1),
+            _predictor(PERSISTENCE, HELD_OUT_SPLIT, horizon=0.1),
+            _predictor("graph", TRAINED_ON_SPLIT, horizon=0.25),
+            _predictor("graph", HELD_OUT_SPLIT, stop="failed", metrics=False),
+        )
+        _write(tmp_path, "a-1", _record(results, training=_history()))
+        _draw(tmp_path, "a-1", *_both("graph"), *_both(PERSISTENCE))
+
+        assert {predictor for _, predictor, _ in _offering(tmp_path)} == {PERSISTENCE}
+
+    def test_a_predictor_with_no_plot_is_not_linked_to_a_missing_file(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+        _draw(tmp_path, "a-1", *_both(PERSISTENCE))
+
+        assert {predictor for _, predictor, _ in _offering(tmp_path)} == {PERSISTENCE}
+
+    def test_every_path_it_offers_exists_on_disk(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+        _draw(tmp_path, "a-1", *_both("graph"), *_both(PERSISTENCE))
+        viewer = _viewer(tmp_path)
+
+        assert viewer is not None
+        assert all((tmp_path / frame.image).is_file() for frame in viewer.frames)
+
+    def test_the_run_that_trained_a_predictor_supplies_its_plot(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), run_id="1" * 16, training=_history()))
+        _write(
+            tmp_path,
+            "b-2",
+            _record(
+                _healthy(),
+                run_id="2" * 16,
+                created="2026-02-01T00:00:00+00:00",
+                training=_history(model="operator"),
+            ),
+        )
+        _draw(tmp_path, "a-1", *_both("graph"))
+        _draw(tmp_path, "b-2", *_both("graph"))
+        viewer = _viewer(tmp_path)
+
+        assert viewer is not None
+        assert all(frame.run_id == "1" * 16 for frame in viewer.frames)
+
+    def test_a_baseline_comes_from_the_most_recent_run_that_drew_it(self, tmp_path: Path) -> None:
+        # No run trains the free baseline, so the newest one wins: it was drawn by the
+        # latest dataset and the latest drawing code.
+        _write(tmp_path, "a-1", _record(_healthy(), run_id="1" * 16, training=_history()))
+        _write(
+            tmp_path,
+            "b-2",
+            _record(
+                _healthy(),
+                run_id="2" * 16,
+                created="2026-02-01T00:00:00+00:00",
+                training=_history(),
+            ),
+        )
+        _draw(tmp_path, "a-1", *_both(PERSISTENCE))
+        _draw(tmp_path, "b-2", *_both(PERSISTENCE))
+        viewer = _viewer(tmp_path)
+
+        assert viewer is not None
+        assert all(frame.run_id == "2" * 16 for frame in viewer.frames)
+
+    def test_a_fault_run_never_supplies_a_frame(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), run_id="1" * 16, training=_history()))
+        _write(
+            tmp_path,
+            "a-fault-broken-2",
+            _record(
+                _healthy(),
+                run_id="2" * 16,
+                created="2026-02-01T00:00:00+00:00",
+                training=_history(),
+            ),
+        )
+        _draw(tmp_path, "a-1", *_both(PERSISTENCE))
+        _draw(tmp_path, "a-fault-broken-2", *_both(PERSISTENCE))
+        viewer = _viewer(tmp_path)
+
+        assert viewer is not None
+        assert all(frame.run_id == "1" * 16 for frame in viewer.frames)
+
+    def test_a_root_with_no_state_plots_has_no_viewer(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+
+        assert _viewer(tmp_path) is None
+
+    def test_the_same_root_gives_the_same_viewer(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+        _draw(tmp_path, "a-1", *_both("graph"), *_both(PERSISTENCE))
+
+        assert _viewer(tmp_path) == _viewer(tmp_path)
+
+    def test_the_learned_model_is_offered_before_the_baselines(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+        _draw(tmp_path, "a-1", *_both("graph"), *_both(PERSISTENCE))
+        viewer = _viewer(tmp_path)
+
+        assert viewer is not None
+        assert viewer.predictors("toy") == ("graph", PERSISTENCE)
+        assert viewer.systems == ("toy",)
+        assert viewer.splits == (TRAINED_ON_SPLIT, HELD_OUT_SPLIT)
+
+    def test_a_combination_it_does_not_offer_is_not_found(self, tmp_path: Path) -> None:
+        _write(tmp_path, "a-1", _record(_healthy(), training=_history()))
+        _draw(tmp_path, "a-1", *_both("graph"))
+        viewer = _viewer(tmp_path)
+
+        assert viewer is not None
+        assert viewer.frame("toy", "graph", TRAINED_ON_SPLIT) is not None
+        assert viewer.frame("toy", NOISE, TRAINED_ON_SPLIT) is None
