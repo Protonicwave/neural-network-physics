@@ -19,6 +19,7 @@ from nnphysics.core.errors import NNPhysicsError
 from nnphysics.evals.snapshots import read_snapshots
 from nnphysics.reporting.compare import DEFAULT_THRESHOLD, Verdict, compare_series
 from nnphysics.reporting.index import KEY_SCALARS, index_runs
+from nnphysics.reporting.landing import LANDING_NAME, render_landing
 from nnphysics.reporting.layout import (
     HTML_NAME,
     MARKDOWN_NAME,
@@ -27,6 +28,7 @@ from nnphysics.reporting.layout import (
     find_record,
     run_paths,
 )
+from nnphysics.reporting.page import build_page
 from nnphysics.reporting.plots import PlotRecord, overlay_plot, render_plots
 from nnphysics.reporting.record import RunRecord, read_record
 from nnphysics.reporting.render import (
@@ -59,6 +61,12 @@ _DEFAULT_ROOT = Path("runs")
 _COMPARISON_DIR = "comparison"
 _MINIMUM_RUNS = 2
 
+_SCORES = Path("docs/results/fault-scores.json")
+"""The one committed data file the landing page reads. Looked for beside the working
+directory, as the agent configuration is, so that building the page from a checkout picks
+it up and building it from anywhere else leaves the diagnosis section out rather than
+failing."""
+
 
 @app.command()
 def render(
@@ -89,6 +97,34 @@ def render(
 
     typer.echo(f"Rendered {len(plots)} plots for run {record.run_id}.")
     typer.echo(f"Wrote {paths.markdown} and {paths.html}.")
+
+
+@app.command()
+def page(
+    root: RootOption = _DEFAULT_ROOT,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=f"Where to write the page. Defaults to {LANDING_NAME} in the runs root.",
+            show_default=False,
+        ),
+    ] = None,
+) -> None:
+    """Build the landing page over every run under the root."""
+    scores = _SCORES if _SCORES.is_file() else None
+    destination = output if output is not None else root / LANDING_NAME
+    try:
+        model = build_page(root, scores=scores)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(render_landing(model), encoding="utf-8")
+    except NNPhysicsError as error:
+        _fail(str(error))
+
+    if scores is None:
+        typer.echo(f"No {_SCORES}, so the page carries no diagnosis section.")
+    typer.echo(f"Wrote {destination} from {len(model.reported)} runs.")
 
 
 @app.command()
@@ -177,17 +213,19 @@ def list_runs(
         return
     keys = [f"{metric}.{key}" for metric, key in KEY_SCALARS]
     typer.echo(
-        f"{'run':<28} {'system':<8} {'split':<9} {'predictor':<20} "
+        f"{'run':<28} {'system':<8} {'split':<9} {'predictor':<20} {'usable':>8} "
         + "  ".join(f"{key:>28}" for key in keys)
+        + f"  {'verdict':<28}"
     )
     for summary in summaries:
         numbers = "  ".join(
             f"{summary.values[key]:>28.4g}" if key in summary.values else f"{'n/a':>28}"
             for key in keys
         )
+        usable = f"{summary.usable:>8.4g}" if summary.usable is not None else f"{'n/a':>8}"
         typer.echo(
             f"{summary.label:<28} {summary.system:<8} {summary.split:<9} "
-            f"{summary.predictor:<20} {numbers}"
+            f"{summary.predictor:<20} {usable} {numbers}  {summary.verdict:<28}"
         )
 
 

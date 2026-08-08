@@ -11,13 +11,41 @@ from typer.testing import CliRunner
 from nnphysics.cli.app import app
 from nnphysics.core.config import RunConfig
 from nnphysics.data.build import build_dataset
+from nnphysics.evals.result import (
+    MetricRecord,
+    PredictorResult,
+    RolloutRecord,
+    SuiteResult,
+    SuiteSettings,
+)
 from nnphysics.evals.snapshots import read_snapshots
-from nnphysics.reporting.layout import HTML_NAME, MARKDOWN_NAME, RECORD_NAME, run_paths
-from nnphysics.reporting.record import read_record
+from nnphysics.evals.speed import CostAccounting, MatchedSpeedup, SpeedPoint, SpeedReport
+from nnphysics.reporting.environment import EnvironmentRecord
+from nnphysics.reporting.landing import LANDING_NAME
+from nnphysics.reporting.layout import (
+    HTML_NAME,
+    MARKDOWN_NAME,
+    PLOTS_DIR,
+    RECORD_NAME,
+    run_paths,
+    state_plot_name,
+)
+from nnphysics.reporting.page import HELD_OUT_SPLIT, PERSISTENCE, TRAINED_ON_SPLIT, USABLE_THRESHOLD
+from nnphysics.reporting.record import RunRecord, read_record, write_record
 
 runner = CliRunner()
 
 EXTERNAL = re.compile(r"""(?:src|href)\s*=\s*["'](?!data:)""", re.IGNORECASE)
+
+REFERENCED = re.compile(r"""(?:src|href)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+"""Whatever the landing page points at. The page references its plots and reports rather
+than embedding them, so what matters is that each path is there beside it."""
+
+HOSTED = re.compile(r"""(?:src|href)\s*=\s*["'](?:[a-z]+:)?//""", re.IGNORECASE)
+"""A reference to somewhere else. The page is served from a directory, not from a site."""
+
+LEARNED = "graph"
+"""A predictor name the harness does not supply, which is what makes it a surrogate."""
 
 CONFIG: dict[str, Any] = {
     "name": "cli-report",
@@ -327,7 +355,7 @@ def test_the_group_is_attached_to_the_application() -> None:
     result = runner.invoke(app, ["report", "--help"])
 
     assert result.exit_code == 0
-    for command in ("render", "compare", "list"):
+    for command in ("render", "page", "compare", "list"):
         assert command in result.output
 
 
@@ -376,3 +404,220 @@ class TestRenderingABenchmarkedRun:
         html = run_paths(config).html.read_text(encoding="utf-8")
 
         assert not EXTERNAL.search(html)
+
+
+def rollouts(count: int = 2) -> tuple[RolloutRecord, ...]:
+    """Rollouts that all ran to the horizon they asked for."""
+    return tuple(
+        RolloutRecord(
+            trajectory=f"t{index}",
+            regime="cold_collapse",
+            split="test",
+            steps_requested=100,
+            steps_completed=100,
+            stop_reason="completed",
+            seconds=0.01,
+        )
+        for index in range(count)
+    )
+
+
+def predictor(name: str, split: str, horizon: float) -> PredictorResult:
+    """One predictor on one split, with its usable stretch chosen directly."""
+    return PredictorResult(
+        predictor=name,
+        spec=name,
+        split=split,
+        regimes=("cold_collapse",),
+        rollouts=rollouts(),
+        metrics=(
+            MetricRecord(
+                name="rollout_error",
+                scalars={"error.final": 1.0, f"horizon.{USABLE_THRESHOLD:g}": horizon},
+            ),
+        ),
+        seconds_per_step=0.002,
+        completed=True,
+    )
+
+
+def benchmark() -> SpeedReport:
+    """A benchmark whose surrogate is slower than the solver setting it matches."""
+    solver = SpeedPoint(
+        label="reference:substeps=1",
+        predictor="reference",
+        kind="solver",
+        substeps=1,
+        error=0.5,
+        seconds_per_step=0.001,
+        iqr=0.0001,
+        relative_spread=0.1,
+        stable=True,
+        completed=True,
+    )
+    surrogate = SpeedPoint(
+        label=LEARNED,
+        predictor=LEARNED,
+        kind="surrogate",
+        substeps=0,
+        error=0.5,
+        seconds_per_step=0.002,
+        iqr=0.0002,
+        relative_spread=0.2,
+        stable=True,
+        completed=True,
+    )
+    return SpeedReport(
+        system="nbody",
+        split="test",
+        steps=100,
+        n_initial_conditions=2,
+        threads=1,
+        trials=5,
+        warmup=1,
+        steps_per_trial=4,
+        dataset_substeps=1,
+        ladder=(solver,),
+        surrogates=(surrogate,),
+        matched=(
+            MatchedSpeedup(
+                predictor=LEARNED,
+                error=0.5,
+                seconds_per_step=0.002,
+                matched_substeps=1,
+                matched_error=0.5,
+                matched_seconds_per_step=0.001,
+                speedup=0.5,
+                bracketed=True,
+            ),
+        ),
+        costs=(
+            CostAccounting(
+                predictor=LEARNED,
+                training_seconds=10.0,
+                generation_seconds=1.0,
+                steps_per_rollout=100,
+                saving_per_rollout=-0.1,
+                break_even_rollouts=-1.0,
+            ),
+        ),
+    )
+
+
+def fixture_record() -> RunRecord:
+    """A run a landing page can be built from: a surrogate, a baseline and a benchmark."""
+    return RunRecord(
+        run_id="0123456789abcdef",
+        name="cli-page",
+        created="2026-01-01T00:00:00+00:00",
+        code_version="0.1.0",
+        commit="a" * 40,
+        config=RunConfig.model_validate(CONFIG),
+        environment=EnvironmentRecord(
+            python="3.12.0",
+            implementation="CPython",
+            platform="Linux 6.1",
+            machine="x86_64",
+            cpu_count=8,
+            packages={"numpy": "2.1.0"},
+        ),
+        timings={"evaluation": 1.5},
+        evaluation=SuiteResult(
+            code_version="0.1.0",
+            run_id="0123456789abcdef",
+            dataset_id="fedcba9876543210",
+            system="nbody",
+            seed=2,
+            settings=SuiteSettings(
+                name="cli",
+                metrics=("rollout_error",),
+                rollout_steps=100,
+                n_initial_conditions=2,
+                error_thresholds=(0.01, USABLE_THRESHOLD, 1.0),
+                symmetry_steps=2,
+                distribution_window=0.25,
+                divergence_factor=1000.0,
+            ),
+            invariants={},
+            results=(
+                predictor(PERSISTENCE, TRAINED_ON_SPLIT, 0.1),
+                predictor(PERSISTENCE, HELD_OUT_SPLIT, 0.1),
+                predictor(LEARNED, TRAINED_ON_SPLIT, 0.25),
+                predictor(LEARNED, HELD_OUT_SPLIT, 0.2),
+            ),
+        ),
+        benchmark=benchmark(),
+    )
+
+
+@pytest.fixture
+def runs_root(tmp_path: Path) -> Path:
+    """A runs root holding one run, with the report and the plots the page links to."""
+    root = tmp_path / "runs"
+    run = root / "cli-page-0123456789abcdef"
+    (run / PLOTS_DIR).mkdir(parents=True)
+    write_record(run / RECORD_NAME, fixture_record())
+    (run / HTML_NAME).write_text("<!DOCTYPE html>\n", encoding="utf-8")
+    for split in (TRAINED_ON_SPLIT, HELD_OUT_SPLIT):
+        for name in (LEARNED, PERSISTENCE):
+            (run / PLOTS_DIR / state_plot_name(split, name)).write_bytes(b"")
+    return root
+
+
+class TestPage:
+    def test_it_writes_the_page_into_the_runs_root(self, runs_root: Path) -> None:
+        result = runner.invoke(app, ["report", "page", "--root", str(runs_root)])
+
+        assert result.exit_code == 0, result.output
+        assert (runs_root / LANDING_NAME).is_file()
+
+    def test_every_link_resolves(self, runs_root: Path) -> None:
+        assert runner.invoke(app, ["report", "page", "--root", str(runs_root)]).exit_code == 0
+
+        page = (runs_root / LANDING_NAME).read_text(encoding="utf-8")
+
+        targets = [
+            target for target in REFERENCED.findall(page) if not target.startswith(("#", "data:"))
+        ]
+        assert targets
+        assert [target for target in targets if not (runs_root / target).exists()] == []
+
+    def test_it_references_no_host(self, runs_root: Path) -> None:
+        assert runner.invoke(app, ["report", "page", "--root", str(runs_root)]).exit_code == 0
+
+        assert not HOSTED.search((runs_root / LANDING_NAME).read_text(encoding="utf-8"))
+
+    def test_building_it_twice_gives_byte_identical_output(self, runs_root: Path) -> None:
+        assert runner.invoke(app, ["report", "page", "--root", str(runs_root)]).exit_code == 0
+        first = (runs_root / LANDING_NAME).read_bytes()
+
+        assert runner.invoke(app, ["report", "page", "--root", str(runs_root)]).exit_code == 0
+
+        assert (runs_root / LANDING_NAME).read_bytes() == first
+
+    def test_it_can_be_written_somewhere_else(self, runs_root: Path, tmp_path: Path) -> None:
+        output = tmp_path / "elsewhere" / "landing.html"
+
+        result = runner.invoke(app, ["report", "page", "--root", str(runs_root), "-o", str(output)])
+
+        assert result.exit_code == 0, result.output
+        assert output.is_file()
+        assert not (runs_root / LANDING_NAME).exists()
+
+    def test_a_root_with_no_records_names_the_directory(self, tmp_path: Path) -> None:
+        empty = tmp_path / "nothing"
+
+        result = runner.invoke(app, ["report", "page", "--root", str(empty)])
+
+        assert result.exit_code == 1
+        assert str(empty) in result.output
+
+    def test_a_run_with_no_surrogate_says_so_rather_than_writing_a_blank_hero(
+        self, rendered: tuple[RunConfig, Path]
+    ) -> None:
+        _, root = rendered
+
+        result = runner.invoke(app, ["report", "page", "--root", str(root)])
+
+        assert result.exit_code == 1
+        assert "surrogate" in result.output

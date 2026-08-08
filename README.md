@@ -49,7 +49,12 @@ uv sync
 uv run nnp data generate --config configs/nbody.yaml   # 38 s
 uv run nnp train         --config configs/nbody.yaml   # 1,328 s, 40 epochs
 uv run nnp report render --run f68ffffd42abb2f4        # 6 s, 20 plots, one HTML file
+uv run nnp report page                                 # 2 s, the landing page over every run
 ```
+
+`serve.bat` builds that landing page and serves `runs/` on port 8000. It answers the
+question at the top of this file for a reader who does not work on simulation, and every
+number on it comes from a run record.
 
 Timings are wall clock on the target machine, eight logical CPU cores and no CUDA.
 [`docs/reproduction.md`](docs/reproduction.md) is the full path from a clean checkout to
